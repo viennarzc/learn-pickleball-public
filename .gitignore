@@ -1,0 +1,16 @@
+# Local QA comparison captures can include reference-inspired source material.
+qa-*.jpg
+.vercel
+node_modules
+
+# Local synthetic UI/UX feedback and supporting screenshots.
+/local-feedback/
+
+# Keep local credentials and private key material out of commits.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx

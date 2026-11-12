@@ -1,0 +1,12 @@
+{
+  "name": "learn-pickleball",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check app.js && node --check content/curriculum.js && node --check content/progress.js && node --check middleware.js && node --check proxy.js && node --check seo.js && node --check api/robots.js && node --check api/sitemap.js && node scripts/check-proxy.mjs && node scripts/check-seo.mjs && node scripts/check-fonts.mjs && node scripts/check-stickers.mjs && node scripts/check-curriculum.mjs && node scripts/check-app-v2.mjs && node scripts/check-ux-p1.mjs && node scripts/check-ux-p2.mjs && node scripts/check-completion-focus.mjs"
+  },
+  "dependencies": {
+    "@vercel/functions": "^3.9.3"
+  }
+}
