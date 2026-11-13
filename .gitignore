@@ -5,6 +5,7 @@ node_modules
 
 # Local synthetic UI/UX feedback and supporting screenshots.
 /local-feedback/
+/design-review/
 
 # Keep local credentials and private key material out of commits.
 .env
