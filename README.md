@@ -6,6 +6,8 @@ A mobile-first prototype for learning pickleball through a guided path, interact
 
 - [Architecture and maintainer guide](docs/ARCHITECTURE.md): stack, layers, data flow, infrastructure, setup, and change paths.
 - [UI/UX recommendations](docs/UI_UX_RECOMMENDATIONS.md): prioritized proposals based on synthetic feedback; proposed work is separate from current behavior.
+- [Design QA report](docs/DESIGN_QA.md): visual and interaction review history.
+- [Security best-practices report](docs/SECURITY_BEST_PRACTICES_REPORT.md): credential audit, remediations, and deployment follow-ups.
 
 ## Illustration system
 

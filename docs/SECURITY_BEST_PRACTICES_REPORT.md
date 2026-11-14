@@ -1,5 +1,7 @@
 # Sensitive Information and Credential Audit
 
+This report records audit observations through 13 November 2026. Historical file paths and deployment results refer to the state at the time of each check; see the repository README for current documentation paths.
+
 ## Follow-up audit — 13 November 2026
 
 This section supersedes the earlier status where it conflicts. The audit used the JavaScript frontend security guidance, inspected the static app, SEO functions, middleware, deployment settings, working-tree filenames, and reachable Git objects. The prior 12 November pattern scan and the 13 November follow-up found no recognizable credential patterns; neither is an exhaustive secret scan. Binary image contents, deleted or unreachable Git objects, hosted scanner settings, and current production headers were not independently verified in this follow-up.
@@ -66,7 +68,7 @@ The local environment-file ignore issue has been addressed. The public productio
 
 ## Follow-up recommendations
 
-1. Add the ignore rules in SEC-001.
+1. SEC-001's environment and key-file ignore rules were added by 12 November and expanded in the 14 November maintenance update below.
 2. Run a repository-host secret scan in CI/pre-commit (for example, a vetted scanner with baseline review).
 3. Verify that the production edge actually serves the headers in `vercel.json`; this audit confirms the repository configuration, not a deployed response.
 
@@ -79,4 +81,9 @@ The local environment-file ignore issue has been addressed. The public productio
 - The GitHub repository is private; the repository API did not return secret-scanning settings, so their status could not be established from that response.
 - Added `.github/workflows/secret-scan.yml` locally to run Gitleaks on pushes, pull requests, and manual requests with full checkout history and immutable action pins. Comments and artifact uploads are disabled to reduce unintended disclosure. The workflow must be committed and run on GitHub before its operation can be verified.
 - An authenticated Vercel fetch of preview commit `2d0210d` returned HTTP 200 with the configured CSP, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, Referrer-Policy, and Permissions-Policy. This confirms those headers on the preview, not the older production deployment. The fetch used a temporary Vercel share link, which expires automatically.
+
+## Ignore-rule maintenance — 14 November 2026
+
+- `.gitignore` now also covers common local build outputs, framework and bundler caches, editor and assistant settings, scratch files, npm configuration, and local AWS/SSH directories. It preserves `.env.example`, `.npmrc.example`, and shared VS Code extension recommendations.
+- These rules reduce accidental staging of local state; they are not a substitute for reviewing staged files or scanning repository history for secrets.
 

@@ -1,7 +1,41 @@
 # Local QA comparison captures can include reference-inspired source material.
 qa-*.jpg
-.vercel
-node_modules
+
+# Local platform state and installed dependencies.
+/.vercel/
+/node_modules/
+
+# Build output and tool caches.
+/build/
+/dist/
+/out/
+/.next/
+/.turbo/
+/.vite/
+/.parcel-cache/
+/.cache/
+/coverage/
+/.nyc_output/
+/logs/
+*.tsbuildinfo
+.eslintcache
+.stylelintcache
+
+# Local editor and assistant configuration. Keep shared VS Code recommendations.
+/.idea/
+/.vscode/*
+!/.vscode/extensions.json
+/.agents/
+/.codex/
+/.cursor/
+/.claude/
+
+# Local scratch files.
+/tmp/
+/temp/
+*.tmp
+*.bak
+*.orig
 
 # Local synthetic UI/UX feedback and supporting screenshots.
 /local-feedback/
@@ -9,7 +43,14 @@ node_modules
 
 # Operating-system and editor leftovers.
 .DS_Store
+._*
+.AppleDouble
+.LSOverride
+.Spotlight-V100/
+.Trashes/
+.TemporaryItems/
 Thumbs.db
+Desktop.ini
 *.swp
 *.swo
 *~
@@ -21,17 +62,20 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 .npm/
-.cache/
-
-# Generated test and coverage output.
-coverage/
-.nyc_output/
+.pnpm-store/
 
 # Keep local credentials and private key material out of commits.
 .env
 .env.*
 !.env.example
+.envrc
+.npmrc
+!.npmrc.example
+/.aws/
+/.ssh/
 *.key
 *.pem
 *.p12
 *.pfx
+*.jks
+*.keystore
