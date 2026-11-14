@@ -343,16 +343,18 @@ function placementExplanation(entryId, target) {
   return "The Library separates official-rule answers from coaching options so you can get context without enrolling in a path.";
 }
 
-function completedLessonCount() { return lessons.filter(isLessonComplete).length; }
+function completedLessons() { return lessons.filter(isLessonComplete); }
+function completedLessonCount() { return completedLessons().length; }
 function practiceCount() { return progress.practiceLogs.length; }
 
 function renderLearn(route) {
   const next = getNextLesson();
-  const completed = completedLessonCount();
+  const completedList = completedLessons();
+  const completed = completedList.length;
   const atlasOpen = study === "atlas" && route.query.get("view") === "atlas";
   return renderShell(`
     <section class="screen-intro page path-intro"><div><p class="eyebrow">Your learning path</p><h1>One calm step closer to court-ready.</h1><p class="lede">Build court skills one step at a time, or find the topic you need.</p><div class="button-row">${next ? `<a class="button button-primary" data-cta-priority="primary" href="${href(`/lesson/${next.id}`)}">Continue: ${escapeHtml(next.title)}</a>` : '<a class="button button-primary" data-cta-priority="primary" href="#/library?view=skills">Choose a deep dive</a>'}<a class="button button-quiet" href="#/learn?review=completed">Review completed lessons</a><a class="button button-quiet" href="#/library?view=rules">Find a rule or skill</a></div><p class="inline-progress"><span>${completed} of ${lessons.filter((lesson) => !isOptional(lesson)).length} core concepts understood</span><span>${practiceCount()} practice logs</span></p></div><figure class="hero-figure hero-figure-stance"><img src="assets/illustrations/stances-ready-v2.png" alt="Four adult players demonstrate balanced ready positions." /></figure></section>
-    ${route.query.get("review") === "completed" ? `<section class="page review-list" aria-labelledby="review-heading"><h2 id="review-heading">Completed lessons</h2>${lessons.filter(isLessonComplete).length ? lessons.filter(isLessonComplete).map((lesson) => `<a class="review-link" href="${href(`/lesson/${lesson.id}`)}">${escapeHtml(lesson.title)} <span>Review</span></a>`).join("") : '<p>No completed lessons yet. Your completed lessons will appear here.</p>'}</section>` : ""}
+    ${route.query.get("review") === "completed" ? `<section class="page review-list" aria-labelledby="review-heading"><h2 id="review-heading">Completed lessons</h2>${completedList.length ? completedList.map((lesson) => `<a class="review-link" href="${href(`/lesson/${lesson.id}`)}">${escapeHtml(lesson.title)} <span>Review</span></a>`).join("") : '<p>No completed lessons yet. Your completed lessons will appear here.</p>'}</section>` : ""}
     ${study === "discovery" ? `<section class="page study-goals" aria-labelledby="study-goals-title"><h2 id="study-goals-title">Choose what helps today</h2><p>Choose a starting route or explore a situation. Your completed lessons remain saved.</p><div class="button-row"><button type="button" class="button button-quiet" data-action="study-entry" data-entry="first-game-essentials">Prepare for my first game</button><button type="button" class="button button-quiet" data-action="study-entry" data-entry="consistency">Build consistency</button></div><h3>Find a skill for your situation</h3><div class="button-row">${situations.map((item) => `<a data-situation-link class="button button-quiet" href="${href("/library", { view: "skills", situation: item.id })}">${escapeHtml(item.label)}</a>`).join("")}</div></section>` : ""}
     <section class="page"><div class="path-heading"><div><p class="eyebrow">Seven units</p><h2>Follow the sequence—or open the part you need.</h2></div><span class="meta">Required pages drive progress; optional references never block it.</span></div>${study === "atlas" ? `<div class="button-row atlas-switch"><a class="button button-quiet" href="${atlasOpen ? "#/learn" : "#/learn?view=atlas"}">${atlasOpen ? "Show learning path" : "Explore the course Atlas"}</a></div>` : ""}${atlasOpen ? renderAtlas() : `<div class="path-list" aria-label="Pickleball learning path">${curriculumUnits.map(renderUnit).join("")}</div>`}</section>`, route);
 }
@@ -360,7 +362,11 @@ function renderLearn(route) {
 function renderAtlas() {
   return `<section class="atlas" aria-labelledby="atlas-title"><h2 id="atlas-title">Course Atlas</h2><p>Explore the units in order. Full lessons may require an earlier step.</p><ol class="atlas-list">${curriculumUnits.map((unit) => {
     const image = normalizeImage(unit.lessons[0]?.illustration, unit.lessons[0]);
-    return `<li class="atlas-unit">${image?.src ? `<div class="atlas-art"><img src="${escapeHtml(image.src)}" alt="" loading="lazy" /></div>` : ""}<div><p class="eyebrow">Unit ${unit.number} · ${escapeHtml(levelLabel(unit.level))}</p><h3>${escapeHtml(unit.title)}</h3><p>${escapeHtml(unit.outcome)}</p><ul>${unit.lessons.map((lesson) => `<li><a href="${href(`/lesson/${lesson.id}`)}">${escapeHtml(lesson.title)}</a> <span class="status ${lessonStatus(lesson).className}">${escapeHtml(lessonStatus(lesson).label)}</span></li>`).join("")}</ul></div></li>`;
+    const lessonRows = unit.lessons.map((lesson) => {
+      const status = lessonStatus(lesson);
+      return `<li><a href="${href(`/lesson/${lesson.id}`)}">${escapeHtml(lesson.title)}</a> <span class="status ${status.className}">${escapeHtml(status.label)}</span></li>`;
+    }).join("");
+    return `<li class="atlas-unit">${image?.src ? `<div class="atlas-art"><img src="${escapeHtml(image.src)}" alt="" loading="lazy" /></div>` : ""}<div><p class="eyebrow">Unit ${unit.number} · ${escapeHtml(levelLabel(unit.level))}</p><h3>${escapeHtml(unit.title)}</h3><p>${escapeHtml(unit.outcome)}</p><ul>${lessonRows}</ul></div></li>`;
   }).join("")}</ol></section>`;
 }
 
@@ -377,8 +383,8 @@ function renderUnit(unit) {
 
 function renderLessonRow(lesson, index) {
   const status = lessonStatus(lesson);
-  const link = isLessonAvailable(lesson) || isLessonComplete(lesson) ? href(`/lesson/${lesson.id}`) : href(`/lesson/${lesson.id}`);
-  return `<a class="lesson-row ${status.className}" href="${link}" data-lesson-id="${escapeHtml(lesson.id)}" data-lesson-status="${status.label.toLowerCase().replace(/\s+/g, "-")}"><span class="row-index">${isLessonComplete(lesson) ? "✓" : String(index + 1).padStart(2, "0")}</span><span><strong>${escapeHtml(lesson.title)}</strong><small>${escapeHtml(lesson.kind || "Guided lesson")} · ${escapeHtml(lesson.duration || "Short session")}</small></span><span class="status ${status.className}">${status.label}</span></a>`;
+  const complete = status.className === "is-complete";
+  return `<a class="lesson-row ${status.className}" href="${href(`/lesson/${lesson.id}`)}" data-lesson-id="${escapeHtml(lesson.id)}" data-lesson-status="${status.label.toLowerCase().replace(/\s+/g, "-")}"><span class="row-index">${complete ? "✓" : String(index + 1).padStart(2, "0")}</span><span><strong>${escapeHtml(lesson.title)}</strong><small>${escapeHtml(lesson.kind || "Guided lesson")} · ${escapeHtml(lesson.duration || "Short session")}</small></span><span class="status ${status.className}">${status.label}</span></a>`;
 }
 
 function renderLesson(route, rawId) {
@@ -422,11 +428,19 @@ function splitBody(body) {
   return String(body).split(/\n\n+/).filter(Boolean).map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("");
 }
 
-function needsCorrectAnswer(activity) {
-  return ["retrieval", "scenario", "simulation", "decision", "score-simulation", "serve-target", "sequence"].includes(activity?.kind);
+function activityKey(lesson, page) { return `${lesson.id}:${page.id}`; }
+
+function getActionLessonPage(target) {
+  const lesson = getLesson(target.dataset.lesson);
+  const page = lesson?.pages?.find((item) => item.id === target.dataset.page);
+  return lesson && page ? { lesson, page } : null;
 }
 
-function activityKey(lesson, page) { return `${lesson.id}:${page.id}`; }
+function correctOptionIndex(activity = {}) {
+  if (Number.isInteger(activity.correctIndex)) return activity.correctIndex;
+  if (Number.isInteger(activity.answerIndex)) return activity.answerIndex;
+  return 0;
+}
 
 function optionValue(option) { return typeof option === "string" ? option : option.label || option.text || option.value || ""; }
 
@@ -442,7 +456,7 @@ function renderActivity(lesson, page, route) {
   const key = activityKey(lesson, page);
   const selection = pageSelections[key];
   const options = activity.options || page.options || ["Use the rule and court cue from this page.", "Choose the option that ignores the key cue."];
-  const correctIndex = Number.isInteger(activity.correctIndex) ? activity.correctIndex : Number.isInteger(activity.answerIndex) ? activity.answerIndex : 0;
+  const correctIndex = correctOptionIndex(activity);
   const hasAnswered = Number.isInteger(selection?.index);
   const correct = selection?.index === correctIndex;
   return `<div class="activity-panel"><p class="eyebrow">${escapeHtml(kind.replace(/-/g, " "))}</p><h3>${escapeHtml(activity.prompt || "What is the useful next decision?")}</h3><p>${escapeHtml(activity.description || "Choose one response. Feedback explains the decision before you move on.")}</p><div class="answer-list" role="group" aria-label="${escapeHtml(activity.prompt || "Lesson check")}">${options.map((option, optionIndex) => { const selected = selection?.index === optionIndex; const state = hasAnswered ? (optionIndex === correctIndex ? "is-correct" : selected ? "is-incorrect" : "") : ""; return `<button class="answer-row ${selected ? "is-selected" : ""} ${state}" type="button" data-action="page-answer" data-lesson="${lesson.id}" data-page="${page.id}" data-index="${optionIndex}" aria-pressed="${selected}"><span class="answer-index">${String.fromCharCode(65 + optionIndex)}</span><span>${escapeHtml(optionValue(option))}</span></button>`; }).join("")}</div>${hasAnswered ? `<div class="feedback" role="status" tabindex="-1"><strong>${correct ? "That is the useful read." : "Keep the key cue in view."}</strong><p>${escapeHtml(correct ? activity.feedback || page.feedback || "That decision matches the court situation described on this page." : activity.incorrectFeedback || "Review the visual, then choose the response that follows the rule or coaching cue.")}</p></div>` : ""}${correct || pageDone ? '<p class="status is-complete">Required check complete</p>' : ""}</div>`;
@@ -457,7 +471,12 @@ function renderSources(ids = []) {
 function renderPractice(route) {
   const drillPages = lessons.flatMap((lesson) => (lesson.pages || []).filter((page) => ["practice", "drill"].includes(page.activity?.kind)).map((page) => ({ lesson, page })));
   const relevant = drillPages.filter(({ lesson }) => isLessonAvailable(lesson) || isLessonComplete(lesson));
-  return renderShell(`<section class="practice-layout page"><div><p class="eyebrow">Practice</p><h1>Take one useful cue to the court.</h1><p class="lede">Practice logs are voluntary. Every activity has a standing, seated, reduced-range, or reading-only way to continue learning.</p><div class="practice-list">${(relevant.length ? relevant : drillPages).map(({ lesson, page }) => `<a class="practice-row" href="${href(`/lesson/${lesson.id}`, { page: page.id })}"><span><strong>${escapeHtml(page.title || lesson.title)}</strong><p>${escapeHtml(page.activity?.practicePrompt || page.body || lesson.outcome)}</p></span><span class="status ${isLessonComplete(lesson) ? "is-complete" : "is-current"}">${isLessonComplete(lesson) ? "Review" : "Open"}</span></a>`).join("")}</div></div><aside class="practice-aside"><p class="eyebrow">Your log</p><h2>${practiceCount()} practice${practiceCount() === 1 ? "" : "s"} recorded</h2><p>Use this as a memory aid, not a score. Court access and physical movement never gate lesson completion.</p><a class="button button-quiet" href="#/progress">See progress</a></aside></section>`, route);
+  const rows = (relevant.length ? relevant : drillPages).map(({ lesson, page }) => {
+    const complete = isLessonComplete(lesson);
+    return `<a class="practice-row" href="${href(`/lesson/${lesson.id}`, { page: page.id })}"><span><strong>${escapeHtml(page.title || lesson.title)}</strong><p>${escapeHtml(page.activity?.practicePrompt || page.body || lesson.outcome)}</p></span><span class="status ${complete ? "is-complete" : "is-current"}">${complete ? "Review" : "Open"}</span></a>`;
+  }).join("");
+  const practiceTotal = practiceCount();
+  return renderShell(`<section class="practice-layout page"><div><p class="eyebrow">Practice</p><h1>Take one useful cue to the court.</h1><p class="lede">Practice logs are voluntary. Every activity has a standing, seated, reduced-range, or reading-only way to continue learning.</p><div class="practice-list">${rows}</div></div><aside class="practice-aside"><p class="eyebrow">Your log</p><h2>${practiceTotal} practice${practiceTotal === 1 ? "" : "s"} recorded</h2><p>Use this as a memory aid, not a score. Court access and physical movement never gate lesson completion.</p><a class="button button-quiet" href="#/progress">See progress</a></aside></section>`, route);
 }
 
 function renderCourt(route) {
@@ -551,11 +570,10 @@ function render({ focusMain = false, lessonFocus = null } = {}) {
   else if (route.path === "/placement") content = renderPlacement(route);
   else if (route.path === "/learn") content = renderLearn(route);
   else if (route.path === "/practice") content = renderPractice(route);
-  else if (["/court", "/court-lab"].includes(route.path)) content = renderCourt(route);
+  else if (["/court", "/court-lab", "/quiz"].includes(route.path)) content = renderCourt(route);
   else if (["/library", "/skills", "/resources"].includes(route.path)) content = renderLibrary(route);
   else if (["/progress", "/achievements"].includes(route.path)) content = renderProgress(route);
   else if (route.segments[0] === "lesson" && route.segments[1]) content = renderLesson(route, route.segments[1]);
-  else if (route.path === "/quiz") content = renderCourt(route);
   else content = renderNotFound(route);
   document.querySelector("#app").innerHTML = content;
   progress.lastViewedRoute = route.raw;
@@ -638,9 +656,9 @@ function handleAction(event) {
   if (action === "set-entry") { progress.entryRouteId = target.dataset.entry; progress.activePlaylistId = target.dataset.entry === "first-game-essentials" ? target.dataset.entry : null; progress.placementAnswers = {}; progress.diagnosticAnswers = {}; persist(); render({ focusMain: true }); return; }
   if (action === "diagnostic-answer") { progress.diagnosticAnswers[target.dataset.question] = Number(target.dataset.value); persist(); render({ focusMain: true }); return; }
   if (action === "placement-restart") { progress.entryRouteId = null; progress.activePlaylistId = null; progress.placementAnswers = {}; progress.diagnosticAnswers = {}; persist(); render({ focusMain: true }); return; }
-  if (action === "page-complete") { const lesson = getLesson(target.dataset.lesson); const page = lesson?.pages.find((item) => item.id === target.dataset.page); if (lesson && page) { recordLessonPage(lesson, page, page.required !== false); showToast(page.required !== false ? "Page recorded. Continue when ready." : "Optional reference saved."); render({ lessonFocus: lessonFocusAfterAction(lesson, page, false) }); } return; }
+  if (action === "page-complete") { const lessonPage = getActionLessonPage(target); if (lessonPage) { const { lesson, page } = lessonPage; recordLessonPage(lesson, page, page.required !== false); showToast(page.required !== false ? "Page recorded. Continue when ready." : "Optional reference saved."); render({ lessonFocus: lessonFocusAfterAction(lesson, page, false) }); } return; }
   if (action === "practice-log") { recordPractice(progress, target.dataset.lesson, target.dataset.mode || "practice"); persist(); showToast("Practice logged. It never changes your concept completion."); render(); return; }
-  if (action === "page-answer") { const lesson = getLesson(target.dataset.lesson); const page = lesson?.pages.find((item) => item.id === target.dataset.page); if (!lesson || !page) return; const activity = page.activity || {}; const index = Number(target.dataset.index); const correctIndex = Number.isInteger(activity.correctIndex) ? activity.correctIndex : Number.isInteger(activity.answerIndex) ? activity.answerIndex : 0; pageSelections[activityKey(lesson, page)] = { index }; recordAttempt(progress, lesson.id, activity.id || page.id, index === correctIndex); if (index === correctIndex) { recordLessonPage(lesson, page, page.required !== false); showToast("Correct. Page recorded."); } else { persist(); } render({ lessonFocus: lessonFocusAfterAction(lesson, page, true) }); return; }
+  if (action === "page-answer") { const lessonPage = getActionLessonPage(target); if (!lessonPage) return; const { lesson, page } = lessonPage; const activity = page.activity || {}; const index = Number(target.dataset.index); const correct = index === correctOptionIndex(activity); pageSelections[activityKey(lesson, page)] = { index }; recordAttempt(progress, lesson.id, activity.id || page.id, correct); if (correct) { recordLessonPage(lesson, page, page.required !== false); showToast("Correct. Page recorded."); } else { persist(); } render({ lessonFocus: lessonFocusAfterAction(lesson, page, true) }); return; }
   if (action === "court-mode") { courtMode = target.dataset.mode; courtFeedback = null; activeCourtZone = null; render(); return; }
   if (action === "court-zone") { handleCourtZone(target); return; }
   if (action === "kitchen-answer") { const correct = target.dataset.answer === "yes"; courtFeedback = { correct, text: correct ? "Volley momentum counts. Landing on or in the non-volley zone after a volley is a fault." : "A volley is not over when its momentum carries the player into the kitchen." }; render(); return; }

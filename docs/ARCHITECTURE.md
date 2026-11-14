@@ -117,7 +117,7 @@ Open `http://127.0.0.1:4173/`. The static server supports the app and public HTM
 
 `npm run check` is the current build gate. It performs JavaScript syntax checks and runs proxy, SEO, font, sticker, curriculum, and app-v2 checks. These include content integrity, progress helper behavior, legacy alias expectations, source-level rendering contracts, and focused P1 summary, filter, evidence, and storage-fallback checks. They are not a full browser integration suite or accessibility certification.
 
-The older `check-learning-flow.mjs` and `check-learning-runtime.mjs` scripts target earlier app structures and are not part of that gate. Do not treat every script in `scripts/` as an actively supported v2 test command.
+The v2 gate is the maintained validation entry point. Do not treat every script in `scripts/` as an actively supported command.
 
 For UI changes, additionally exercise fresh/partial/complete progress, locked and legacy links, storage failure, Court Lab gates, modal focus, keyboard input, small screens, zoom, reduced motion, and failed images. For infrastructure changes, verify live headers, allowed/denied request behavior, and robots/sitemap responses. Use `git diff --check` for documentation and patch hygiene.
 
