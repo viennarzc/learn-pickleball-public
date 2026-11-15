@@ -45,6 +45,9 @@ export const ROUTES = [
   //   ?return=<lessonId>  focus that lesson's row when coming back
   { path: "/learn", view: "learn", nav: "learn", title: titled("Learn") },
 
+  // Optional Keep Score activity, also accessible from Library without prerequisites.
+  { path: "/scoring", view: "scoring", nav: "learn", title: titled("Who serves next?") },
+
   // Practice hub: drills and the practice log.
   { path: "/practice", view: "practice", nav: "practice", title: titled("Practice") },
 

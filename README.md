@@ -27,6 +27,16 @@ python3 -m http.server 4173 --bind 127.0.0.1
 
 Then open `http://127.0.0.1:4173/`.
 
+If you have Node.js installed, you can also run the project's local check
+server with:
+
+```bash
+npm run test:ui
+```
+
+This starts a temporary local server and runs the browser checks in Chrome.
+To serve the app without running tests, use the Python command above.
+
 ## Deploy to Vercel
 
 This repository is ready to import as an **Other** framework project on Vercel. The included `vercel.json` validates the app during the build and applies response-security headers. The root `middleware.js` is the supported Vercel Routing Middleware entrypoint and runs the bot guard before static files are served.

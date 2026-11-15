@@ -25,6 +25,7 @@ import {
   recordPractice,
 } from "./content/progress.js";
 import { parseRoute, matchRoute, href, titled, NAV_ITEMS } from "./routing/simple-router.js";
+import { renderScoringWalkthrough, mountScoringWalkthrough } from "./content/scoring-walkthrough.js";
 
 const lessons = getAllLessons();
 const lessonIds = new Set(lessons.map((lesson) => lesson.id));
@@ -89,6 +90,7 @@ let libraryQuery = "";
 let pageSelections = {};
 let toastTimer;
 let searchTimer;
+let stopScoringWalkthrough;
 const UNIT_SESSION_KEY = study ? `learn-pickleball:study:${study}:unit-disclosures` : "learn-pickleball:unit-disclosures";
 let unitDisclosure = {};
 try {
@@ -403,7 +405,7 @@ function renderAtlas() {
       const status = lessonStatus(lesson);
       return `<li><a href="${href(`/lesson/${lesson.id}`)}">${escapeHtml(lesson.title)}</a> <span class="status ${status.className}">${escapeHtml(status.label)}</span></li>`;
     }).join("");
-    return `<li class="atlas-unit">${image?.src ? `<div class="atlas-art"><img src="${escapeHtml(image.src)}" alt="" loading="lazy" /></div>` : ""}<div><p class="eyebrow">Unit ${unit.number} · ${escapeHtml(levelLabel(unit.level))}</p><h3>${escapeHtml(unit.title)}</h3><p>${escapeHtml(unit.outcome)}</p><ul>${lessonRows}</ul></div></li>`;
+    return `<li class="atlas-unit">${image?.src ? `<div class="atlas-art"><img src="${escapeHtml(image.src)}" alt="" loading="lazy" /></div>` : ""}<div><p class="eyebrow">Unit ${unit.number} · ${escapeHtml(levelLabel(unit.level))}</p><h3>${escapeHtml(unit.title)}</h3><p>${escapeHtml(unit.outcome)}</p><ul>${lessonRows}</ul>${unit.id === "unit-3" ? scoringLink() : ""}</div></li>`;
   }).join("")}</ol></section>`;
 }
 
@@ -415,7 +417,7 @@ function renderUnit(unit) {
   const recommended = progress.placementAnswers?.recommendedUnit === unit.number || progress.placementAnswers?.recommendedUnit === unit.id;
   const open = typeof unitDisclosure[unit.id] === "boolean" ? unitDisclosure[unit.id] : current || recommended || complete;
   const status = complete ? { label: "Complete", className: "is-complete" } : current ? { label: "Current", className: "is-current" } : available ? { label: "Available", className: "is-current" } : unit.optional ? { label: "Optional deep dive", className: "is-locked" } : { label: "Locked", className: "is-locked" };
-  return `<details class="unit ${status.className}" data-unit-id="${escapeHtml(unit.id)}" ${open ? "open" : ""}><summary class="unit-summary"><div><p class="eyebrow">Unit ${unit.number} · ${escapeHtml(unit.level || unit.levelIntent || "Guided path")}</p><h3>${escapeHtml(unit.title)}</h3><p>${escapeHtml(unit.outcome || unit.summary || "Build a reliable next skill.")}</p></div><span class="status ${status.className}">${status.label}</span></summary><div class="unit-details lesson-list">${unitLessons.map((lesson, index) => renderLessonRow(lesson, index)).join("")}</div></details>`;
+  return `<details class="unit ${status.className}" data-unit-id="${escapeHtml(unit.id)}" ${open ? "open" : ""}><summary class="unit-summary"><div><p class="eyebrow">Unit ${unit.number} · ${escapeHtml(unit.level || unit.levelIntent || "Guided path")}</p><h3>${escapeHtml(unit.title)}</h3><p>${escapeHtml(unit.outcome || unit.summary || "Build a reliable next skill.")}</p></div><span class="status ${status.className}">${status.label}</span></summary><div class="unit-details lesson-list">${unitLessons.map((lesson, index) => renderLessonRow(lesson, index)).join("")}${unit.id === "unit-3" ? `<div class="scoring-unit-link">${scoringLink()}</div>` : ""}</div></details>`;
 }
 
 function renderLessonRow(lesson, index) {
@@ -640,6 +642,7 @@ function renderRefresher(route) {
         </div>
       </details>
       <div class="button-row refresher-actions">
+        ${topic.guideId === "score-guide" ? scoringLink("refresher") : ""}
         ${refresherLink("All refresher topics")}
         <a class="button button-quiet" href="${href(`/lesson/${lesson.id}`)}">${lessonLabel}</a>
       </div>
@@ -683,7 +686,7 @@ function renderLibrary(route) {
   const filtered = items.filter((item) => (!situation || situation.lessons.includes(item.id)) && (!query || `${item.title} ${item.description} ${item.summary || ""} ${item.tag}`.toLowerCase().includes(query)) && (libraryFilter === "All topics" || item.tag === libraryFilter));
   const filters = ["All topics", ...new Set(items.map((item) => item.tag).filter(Boolean))].slice(0, 8);
   const situationLinks = study === STUDY_CONDITIONS.DISCOVERY && view === "skills" ? `<nav class="situation-nav" aria-label="Find skills by situation"><span>Explore a situation:</span> <a data-situation-link href="#/library?view=skills" ${!situation ? 'aria-current="page"' : ""}>All situations</a>${situations.map((item) => `<a data-situation-link href="${href("/library", { view: "skills", situation: item.id })}" ${situation?.id === item.id ? 'aria-current="page"' : ""}>${escapeHtml(item.label)}</a>`).join("")}</nav>` : "";
-  return renderShell(`<section class="page"><div class="library-head"><div><p class="eyebrow">Library</p><h1>Find a rule or skill when you need it.</h1><p class="lede">Find a quick answer or explore a full lesson. Lesson prerequisites still apply.</p><a class="button button-quiet" href="/learn-pickleball/gear/">Beginner gear guide <span aria-hidden="true">→</span></a></div><label><span class="eyebrow">Search</span><input class="library-search" type="search" value="${escapeHtml(libraryQuery)}" placeholder="Kitchen, score, drop, or safety" data-input="library-query" /></label></div>${renderLibraryTabs(view)}${situationLinks}<div class="library-layout"><aside class="library-filter"><span>Browse by</span>${filters.map((filter) => `<button type="button" aria-pressed="${libraryFilter === filter}" data-action="library-filter" data-filter="${escapeHtml(filter)}">${escapeHtml(filter)}</button>`).join("")}</aside><div><div class="library-controls"><p role="status" aria-live="polite">${filtered.length} ${filtered.length === 1 ? "result" : "results"}</p><button type="button" class="button button-quiet" data-action="library-clear">Clear search and filters</button></div><div class="library-list">${filtered.length ? filtered.map((item) => view === "rules" ? `<article class="library-guide"><h2>${escapeHtml(item.title)}</h2><p>${escapeHtml(item.summary || item.description)}</p>${renderSources(item.sourceIds || [])}<a class="button button-quiet" href="${escapeHtml(item.href)}">Open full lesson: ${escapeHtml(item.title)} (prerequisites may apply)</a></article>` : `<a class="library-row" href="${escapeHtml(item.href)}">${item.image ? `<span class="library-thumbnail"><img src="${escapeHtml(item.image.src)}" alt="${escapeHtml(item.image.alt)}" /></span>` : '<span class="library-thumbnail" aria-hidden="true"></span>'}<span><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.description)}</p>${study === STUDY_CONDITIONS.DISCOVERY ? `<small>${escapeHtml(levelLabel(getUnit(getLesson(item.id))?.level))}</small>` : ""}</span><span class="library-tag">${escapeHtml(item.tag)}</span></a>`).join("") : '<p class="muted">No matching items yet. Try a broader word or clear the search and filters.</p>'}</div></div></div></section>`, route);
+  return renderShell(`<section class="page"><div class="library-head"><div><p class="eyebrow">Library</p><h1>Find a rule or skill when you need it.</h1><p class="lede">Find a quick answer or explore a full lesson. Lesson prerequisites still apply.</p><div class="button-row">${scoringLink(view)}<a class="button button-quiet" href="/learn-pickleball/gear/">Beginner gear guide <span aria-hidden="true">→</span></a></div></div><label><span class="eyebrow">Search</span><input class="library-search" type="search" value="${escapeHtml(libraryQuery)}" placeholder="Kitchen, score, drop, or safety" data-input="library-query" /></label></div>${renderLibraryTabs(view)}${situationLinks}<div class="library-layout"><aside class="library-filter"><span>Browse by</span>${filters.map((filter) => `<button type="button" aria-pressed="${libraryFilter === filter}" data-action="library-filter" data-filter="${escapeHtml(filter)}">${escapeHtml(filter)}</button>`).join("")}</aside><div><div class="library-controls"><p role="status" aria-live="polite">${filtered.length} ${filtered.length === 1 ? "result" : "results"}</p><button type="button" class="button button-quiet" data-action="library-clear">Clear search and filters</button></div><div class="library-list">${filtered.length ? filtered.map((item) => view === "rules" ? `<article class="library-guide"><h2>${escapeHtml(item.title)}</h2><p>${escapeHtml(item.summary || item.description)}</p>${renderSources(item.sourceIds || [])}<a class="button button-quiet" href="${escapeHtml(item.href)}">Open full lesson: ${escapeHtml(item.title)} (prerequisites may apply)</a></article>` : `<a class="library-row" href="${escapeHtml(item.href)}">${item.image ? `<span class="library-thumbnail"><img src="${escapeHtml(item.image.src)}" alt="${escapeHtml(item.image.alt)}" /></span>` : '<span class="library-thumbnail" aria-hidden="true"></span>'}<span><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.description)}</p>${study === STUDY_CONDITIONS.DISCOVERY ? `<small>${escapeHtml(levelLabel(getUnit(getLesson(item.id))?.level))}</small>` : ""}</span><span class="library-tag">${escapeHtml(item.tag)}</span></a>`).join("") : '<p class="muted">No matching items yet. Try a broader word or clear the search and filters.</p>'}</div></div></div></section>`, route);
 }
 
 function renderProgress(route) {
@@ -702,6 +705,22 @@ function renderNotFound(route) {
   return renderShell(`<section class="empty-state"><p class="eyebrow">That page is not available</p><h1>Let’s return to a useful next step.</h1><p class="lede">The link may be old, or the lesson may now live under a refined curriculum name.</p><div class="button-row"><a class="button button-primary" href="#/learn">Open learning path</a><a class="button button-quiet" href="#/library?view=rules">Search Library</a></div></section>`, route);
 }
 
+function scoringLink(from) {
+  return `<a class="button button-quiet" data-scoring-link href="${href("/scoring", from ? { from } : null)}">Try: Who serves next? <span aria-hidden="true">→</span></a>`;
+}
+
+function renderScoring(route) {
+  const from = route.query.get("from");
+  const library = ["skills", "rules", "refresher"].includes(from);
+  const returnLink = library
+    ? (from === "refresher" ? refresherHref("score-guide") : href("/library", { view: from }))
+    : href("/learn", { return: "scoring-walkthrough" });
+  return renderShell(`${renderScoringWalkthrough()}<div class="page scoring-footer">
+    <a class="button button-quiet" href="${escapeHtml(returnLink)}">← Back to ${library ? "Library" : "Keep Score"}</a>
+    ${renderSources(["R6"])}
+  </div>`, route);
+}
+
 function render({ focusMain = false, lessonFocus = null } = {}) {
   const route = getRoute();
   let content;
@@ -711,6 +730,7 @@ function render({ focusMain = false, lessonFocus = null } = {}) {
     home: renderHome,
     placement: renderPlacement,
     learn: renderLearn,
+    scoring: renderScoring,
     practice: renderPractice,
     court: renderCourt,
     library: renderLibrary,
@@ -719,7 +739,13 @@ function render({ focusMain = false, lessonFocus = null } = {}) {
     notFound: renderNotFound,
   };
   content = (views[match.view] || renderNotFound)(route);
+  stopScoringWalkthrough?.();
+  stopScoringWalkthrough = undefined;
   document.querySelector("#app").innerHTML = content;
+  if (match.view === "scoring") {
+    const walkthrough = document.querySelector("[data-scoring-walkthrough]");
+    if (walkthrough) stopScoringWalkthrough = mountScoringWalkthrough(walkthrough);
+  }
   progress.lastViewedRoute = route.raw;
   persist();
   document.title = titleForRoute(route);
@@ -729,10 +755,13 @@ function render({ focusMain = false, lessonFocus = null } = {}) {
   });
   if (focusMain && !activeSticker && !lessonFocus) requestAnimationFrame(() => {
     const returnId = match.path === "/learn" ? route.query.get("return") : null;
-    const row = returnId && [...document.querySelectorAll("[data-lesson-id]")].find((element) => element.dataset.lessonId === returnId);
+    const row = returnId === "scoring-walkthrough"
+      ? document.querySelector("[data-scoring-link]")
+      : returnId && [...document.querySelectorAll("[data-lesson-id]")].find((element) => element.dataset.lessonId === returnId);
     const refresherHeading = isRefresherRoute(route) && document.querySelector("[data-refresher-heading]");
     if (row) { const unit = row.closest("details"); if (unit) unit.open = true; row.focus(); }
     else if (refresherHeading) refresherHeading.focus();
+    else if (match.view === "scoring") document.querySelector("#scoring-title")?.focus();
     else document.querySelector("#main-content")?.focus({ preventScroll: true });
   });
   if (activeSticker) requestAnimationFrame(() => document.querySelector('[data-action="sticker-dismiss"]')?.focus({ preventScroll: true }));

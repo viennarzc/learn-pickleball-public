@@ -1,14 +1,13 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
+import * as scoring from "../content/scoring-walkthrough.js";
 import * as curriculum from "../content/curriculum.js";
 import * as routing from "../routing/simple-router.js";
 import * as storage from "../content/progress.js";
 
 const code = (await readFile(new URL("../app.js", import.meta.url), "utf8"))
-  .replace(/^import\s*\{[\s\S]*?\}\s*from\s*"\.\/content\/curriculum\.js";\s*/, "")
-  .replace(/^import\s*\{[\s\S]*?\}\s*from\s*"\.\/content\/progress\.js";\s*/, "")
-  .replace(/^import\s*\{[\s\S]*?\}\s*from\s*"\.\/routing\/[a-z-]+\.js";\s*/, "");
+  .replace(/^import\s*\{[\s\S]*?\}\s*from\s*"\.\/[^"]+";\s*/gm, "");
 const local = new Map();
 const session = new Map();
 const localStorage = { getItem: (key) => local.get(key) ?? null, setItem: (key, value) => local.set(key, value), removeItem: (key) => local.delete(key) };
@@ -23,7 +22,7 @@ function start(search, hash = "#/learn") {
   const app = { innerHTML: "" };
   const window = { location: { search, hash }, localStorage, sessionStorage, addEventListener() {}, history: { replaceState(_state, _title, url) { window.location.hash = url; } } };
   globalThis.window = window;
-  const context = { ...curriculum, ...storage, ...routing, URLSearchParams, console, setTimeout, clearTimeout, window, document: { querySelector: (selector) => selector === "#app" ? app : null, addEventListener() {}, title: "" }, requestAnimationFrame() {} };
+  const context = { ...curriculum, ...storage, ...routing, ...scoring, URLSearchParams, console, setTimeout, clearTimeout, window, document: { querySelector: (selector) => selector === "#app" ? app : null, addEventListener() {}, title: "" }, requestAnimationFrame() {} };
   vm.createContext(context);
   vm.runInContext(code + `\nglobalThis.test = { render, handleAction, rememberUnit, situations, getProgress: () => progress };`, context);
   return { app, window, ...context.test, act(dataset) { context.test.handleAction({ target: { closest: () => ({ dataset }) } }); } };

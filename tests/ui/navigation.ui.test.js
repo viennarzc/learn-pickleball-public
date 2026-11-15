@@ -107,3 +107,73 @@ for (const device of DEVICES) {
     }
   });
 }
+
+const scoringControl = (control) => `[data-scoring-control="${control}"]`;
+const scoringState = `({
+  call: [...document.querySelectorAll("[data-scoring-call] strong")].map((number) => +number.textContent),
+  server: document.querySelector(".scoring-player.is-serving span")?.textContent,
+  side: document.querySelector(".scoring-player.is-serving")?.dataset.side,
+})`;
+
+it("opens the ungated doubles walkthrough from Library and reveals the next server", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${server.url}/#/library?view=rules`);
+    await page.waitFor('document.querySelector("main")?.dataset.view === "library"');
+    await page.click("[data-scoring-link]");
+    await page.waitFor('document.querySelector("main")?.dataset.view === "scoring"');
+
+    for (const [call, server, side] of [
+      [[0, 0, 2], "Mira", "right"],
+      [[1, 0, 2], "Mira", "left"],
+      [[0, 1, 1], "Leo", "right"],
+      [[0, 1, 2], "Sam", "left"],
+      [[1, 1, 2], "Sam", "right"],
+    ]) {
+      await page.click(scoringControl("next"));
+      assert.deepEqual(await page.evaluate(scoringState), { call, server, side });
+    }
+    await page.click(scoringControl("next"));
+    assert.equal(await page.evaluate('document.querySelector("[data-scoring-count]").textContent'), "Step 6 of 6");
+    assert.equal(await page.evaluate('document.querySelector("[data-scoring-choices]").hidden'), false);
+    assert.deepEqual(await page.evaluate(scoringState), { call: [1, 1, 2], server: "Sam", side: "right" });
+    await page.click('[data-scoring-answer="1"]');
+    assert.deepEqual(await page.evaluate(scoringState), { call: [1, 1, 1], server: "Jo", side: "right" });
+    assert.equal(await page.evaluate('document.querySelector("[data-scoring-feedback]").textContent'), "Correct.");
+    assert.equal(await page.evaluate('document.querySelector(".scoring-track").style.getPropertyValue("--scoring-progress")'), "100%");
+    assert.deepEqual(page.errors, []);
+  } finally {
+    await page.close();
+  }
+});
+
+it("opens from Keep Score on mobile and stops singles autoplay at the prediction", async () => {
+  const page = await browser.newPage({ width: 390, height: 844, mobile: true });
+  try {
+    await page.goto(`${server.url}/#/learn`);
+    await page.waitFor('document.querySelector("main")?.dataset.view === "learn"');
+    const unit = '[data-unit-id="unit-3"]';
+    await page.evaluate(`document.documentElement.style.scrollBehavior = "auto"`);
+    await page.tap(`${unit} > summary`);
+    await page.tap(`${unit} [data-scoring-link]`);
+    await page.waitFor('document.querySelector("main")?.dataset.view === "scoring"');
+    await page.tap('[data-scoring-format="singles"]');
+    await page.tap(scoringControl("auto"));
+    await page.waitFor('document.querySelector("[data-scoring-count]").textContent === "Step 2 of 6"', { timeout: 8000 });
+    assert.deepEqual(await page.evaluate(scoringState), { call: [1, 0], server: "Mira", side: "left" });
+    await page.tap(scoringControl("auto"));
+    assert.equal(await page.evaluate(`document.querySelector('${scoringControl("auto")}').textContent`), "Autoplay");
+    for (let rally = 0; rally < 3; rally += 1) await page.tap(scoringControl("next"));
+    assert.deepEqual(await page.evaluate(scoringState), { call: [2, 1], server: "Leo", side: "right" });
+    await page.tap(scoringControl("auto"));
+    await page.waitFor('!document.querySelector("[data-scoring-choices]").hidden', { timeout: 8000 });
+    assert.equal(await page.evaluate(`document.querySelector('${scoringControl("auto")}').hidden`), true);
+    await page.tap('[data-scoring-answer="0"]');
+    assert.deepEqual(await page.evaluate(scoringState), { call: [1, 2], server: "Mira", side: "left" });
+    assert.match(await page.evaluate('document.querySelector("[data-scoring-feedback]").textContent'), /You chose Mira, from the right/);
+    assert.equal(await page.evaluate("document.documentElement.scrollWidth"), 390);
+    assert.deepEqual(page.errors, []);
+  } finally {
+    await page.close();
+  }
+});
