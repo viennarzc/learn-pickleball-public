@@ -1,13 +1,37 @@
-export const STORE_KEY = "learn-pickleball:v2";
 export const APP_VERSION = 2;
+
+const STORAGE = Object.freeze({
+  namespace: "learn-pickleball",
+  study: "study",
+  versionPrefix: "v",
+});
+
+export const STORE_KEY = `${STORAGE.namespace}:${STORAGE.versionPrefix}${APP_VERSION}`;
+
+export const STUDY_CONDITIONS = Object.freeze({
+  BASELINE: "baseline",
+  DISCOVERY: "discovery",
+  ATLAS: "atlas",
+});
+
+export const COURT_ZONES = Object.freeze({
+  KITCHEN: "kitchen",
+  SERVICE: "service",
+  BASELINE: "baseline",
+});
+
+const studyConditionValues = Object.freeze(Object.values(STUDY_CONDITIONS));
+const courtZoneValues = Object.freeze(Object.values(COURT_ZONES));
 
 export function studyCondition(search = "") {
   const condition = new URLSearchParams(search).get("study");
-  return ["baseline", "discovery", "atlas"].includes(condition) ? condition : null;
+  return studyConditionValues.includes(condition) ? condition : null;
 }
 
 export function progressKey(condition) {
-  return condition ? `learn-pickleball:study:${condition}:v2` : STORE_KEY;
+  return condition
+    ? `${STORAGE.namespace}:${STORAGE.study}:${condition}:${STORAGE.versionPrefix}${APP_VERSION}`
+    : STORE_KEY;
 }
 
 export function createFreshProgress() {
@@ -45,7 +69,7 @@ export function normalizeProgress(value, lessonIds = new Set()) {
       practiceLogs: Array.isArray(item?.practiceLogs) ? item.practiceLogs : [],
     }]));
   base.practiceLogs = Array.isArray(value.practiceLogs) ? value.practiceLogs : [];
-  const validCourtZones = new Set(["kitchen", "service", "baseline"]);
+  const validCourtZones = new Set(courtZoneValues);
   base.courtVisited = Array.isArray(value.courtVisited)
     ? [...new Set(value.courtVisited.filter((zone) => validCourtZones.has(zone)))]
     : [];
