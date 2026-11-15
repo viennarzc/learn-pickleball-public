@@ -34,7 +34,7 @@ The diagram groups infrastructure responsibilities; it is not a claim about the 
 | Local state | [content/progress.js](../content/progress.js) | Fresh state, normalization, storage access, page completion, attempts, and practice logs. It does not render UI or decide lesson availability. |
 | Public discovery | [learn-pickleball/](../learn-pickleball/), [public.css](../public.css), [seo.js](../seo.js) | Static article content and metadata, with links into interactive lessons. Browser script adjusts canonical/social URLs to the current origin and adds JSON-LD. |
 | SEO responses | [api/robots.js](../api/robots.js), [api/sitemap.js](../api/sitemap.js), [api/seo-pages.js](../api/seo-pages.js) | Plain-text robots and XML sitemap, sharing a six-URL registry including `/`. No learner state is involved. |
-| Hosting and request policy | [vercel.json](../vercel.json), [middleware.js](../middleware.js), [proxy.js](../proxy.js) | Validation build, root static output, rewrites, security headers, and user-agent guard. Dashboard configuration is a separate operational concern. |
+| Hosting and request policy | [vercel.json](../vercel.json), [.vercelignore](../.vercelignore), [middleware.js](../middleware.js), [proxy.js](../proxy.js) | Validation build, root static output, deployment exclusions, rewrites, security headers, and user-agent guard. Dashboard configuration is a separate operational concern. |
 | Assets and checks | [assets/](../assets/), [scripts/](../scripts/), [package.json](../package.json) | Local images/fonts and executable integrity checks. The only declared package dependency is `@vercel/functions`; the lockfile pins installation resolution. |
 
 ### Browser flow
@@ -80,7 +80,7 @@ No service worker or offline app cache is implemented. Local progress persistenc
 
 ## Hosting, SEO, and infrastructure
 
-Vercel configuration uses `framework: null`, `buildCommand: npm run check`, and `outputDirectory: .`. The build validates source; it does not compile a bundle or generate a separate distribution folder. Treat deployable repository content as potentially public and inspect deployment contents before publishing internal artifacts. `.gitignore` controls Git tracking, not a universal hosting access policy.
+Vercel configuration uses `framework: null`, `buildCommand: npm run check`, and `outputDirectory: .`. The build validates source; it does not compile a bundle or generate a separate distribution folder. Treat deployable repository content as potentially public. `.gitignore` keeps local notes from ordinary Git staging, while `.vercelignore` excludes internal documentation from deployment uploads; neither rule removes files already committed from Git history.
 
 `middleware.js` re-exports the guard from `proxy.js` and matches all paths. The guard returns a no-store 403 for its explicit automation user-agent patterns, otherwise calls `next()`. It deliberately avoids generic “bot” matching, but includes common headless/automation clients, which can affect deployed browser tests. It is neither authentication nor robust protection against spoofed user agents.
 

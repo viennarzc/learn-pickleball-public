@@ -41,6 +41,11 @@ qa-*.jpg
 /local-feedback/
 /design-review/
 
+# Internal audit notes, raw research, and private operational documentation.
+/docs/internal/
+/docs/research/private/
+/docs/operations/private/
+
 # Operating-system and editor leftovers.
 .DS_Store
 ._*

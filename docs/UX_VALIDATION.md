@@ -7,6 +7,7 @@ The feedback in `design-review/synthetic-feedback.md` is synthetic. The followin
 - Recruit people with different levels of pickleball experience, including first-time and returning learners. Include participants who use a keyboard, enlarged text, or a screen reader when possible. Ask about access needs rather than assuming them from age.
 - Use a test build and a disposable browser profile. Prepare fresh, partially completed, and completed progress states. Keep any test data separate from a participant's own progress.
 - Record the build or commit, device, browser, zoom, input method, and the progress state used for each task. Obtain consent before recording and avoid collecting unnecessary personal information.
+- Keep consent forms, recordings, identifiable notes, and raw participant data outside this repository. Only publish anonymized summaries when they are appropriate to share.
 - Have participants think aloud if comfortable. Do not point out controls or teach the interface during the task; record any assistance separately.
 
 ## P1 tasks

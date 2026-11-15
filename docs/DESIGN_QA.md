@@ -113,9 +113,8 @@ final result: passed
 
 ### Source and implementation evidence
 
-- **Source visual target:** `design-review/refined-plan.png` — approved Quiet Coach Learn-path mock at 1440 × 1024.
-- **Implementation render:** `/private/tmp/learn-v2-plan-1440.png` — fresh-v2 Learn route at the same 1440 × 1024 viewport.
-- **Combined comparison:** `/private/tmp/design-qa-compare-final.png` — source and browser-rendered implementation examined side by side in one input.
+- **Source visual target:** locally held approved Quiet Coach Learn-path mock at 1440 × 1024; the source image is not distributed here.
+- **Implementation render and comparison:** temporary local QA artifacts created at the same 1440 × 1024 viewport; those files are not distributed here.
 - **App-wide captures:** `design-review/current-v2/desktop/` at 1280 px and `design-review/current-v2/mobile/` at 390 px. The seven route states are Learn, Practice, Court Lab, Library, Progress, a variable-depth lesson, and a public rule guide.
 
 | Surface | Dimensions / state | Result |

@@ -1,0 +1,4 @@
+# Internal notes and unpublished research or operations files are never deployment assets.
+docs/internal/
+docs/research/private/
+docs/operations/private/
