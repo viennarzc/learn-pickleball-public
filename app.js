@@ -24,6 +24,7 @@ import {
   recordAttempt,
   recordPractice,
 } from "./content/progress.js";
+import { parseRoute, matchRoute, href, titled, NAV_ITEMS } from "./routing/simple-router.js";
 
 const lessons = getAllLessons();
 const lessonIds = new Set(lessons.map((lesson) => lesson.id));
@@ -114,15 +115,7 @@ function normalizeImage(value, lesson) {
 }
 
 function getRoute() {
-  const raw = window.location.hash || "#/";
-  const trimmed = raw.startsWith("#") ? raw.slice(1) : raw;
-  const [pathPart, queryPart = ""] = trimmed.split("?");
-  return { raw, path: pathPart || "/", segments: (pathPart || "/").split("/").filter(Boolean), query: new URLSearchParams(queryPart) };
-}
-
-function href(path, query) {
-  const prefix = path.startsWith("/") ? path : `/${path}`;
-  return `#${prefix}${query ? `?${new URLSearchParams(query).toString()}` : ""}`;
+  return parseRoute(window.location.hash);
 }
 
 function refresherHref(topic) {
@@ -242,7 +235,8 @@ function recordLessonPage(lesson, page, required = page.required !== false) {
   recordPage(progress, lesson.id, page.id, { required });
   updateConceptStatus(lesson);
   const route = getRoute();
-  if (required && !wasComplete && isLessonComplete(lesson) && route.segments[0] === "lesson" && !route.query.has("page") && resolveLesson(route.segments[1]).lesson?.id === lesson.id) {
+  const match = matchRoute(route);
+  if (required && !wasComplete && isLessonComplete(lesson) && match.view === "lesson" && !route.query.has("page") && resolveLesson(match.params.lessonId).lesson?.id === lesson.id) {
     route.query.set("page", page.id);
     window.history.replaceState(null, "", href(route.path, route.query));
   }
@@ -272,22 +266,12 @@ function resolveLesson(rawId) {
 }
 
 function navKey(route) {
-  if (["/", "/home", "/learn", "/placement"].includes(route.path) || route.path.startsWith("/lesson") || route.path.startsWith("/unit")) return "learn";
-  if (route.path === "/practice") return "practice";
-  if (["/court", "/court-lab", "/quiz"].includes(route.path)) return "court";
-  if (["/library", "/skills", "/resources"].includes(route.path)) return "library";
-  return "progress";
+  return matchRoute(route).nav;
 }
 
 function renderHeader(route) {
   const current = navKey(route);
-  const navigation = [
-    ["learn", "Learn", "#/learn"],
-    ["practice", "Practice", "#/practice"],
-    ["court", "Court Lab", "#/court-lab"],
-    ["library", "Library", "#/library?view=skills"],
-    ["progress", "Progress", "#/progress"],
-  ];
+  const navigation = NAV_ITEMS.map((item) => [item.id, item.label, item.href]);
   return `
     <header class="site-header">
       <a class="brand" href="#/" aria-label="Learn Pickleball home"><span class="brand-mark" aria-hidden="true">LP</span><span>Learn Pickleball</span></a>
@@ -299,7 +283,7 @@ function renderHeader(route) {
 
 function renderBottomNav(route) {
   const current = navKey(route);
-  const navigation = [["learn", "Learn", "#/learn"], ["practice", "Practice", "#/practice"], ["court", "Court", "#/court-lab"], ["library", "Library", "#/library?view=skills"], ["progress", "Progress", "#/progress"]];
+  const navigation = NAV_ITEMS.map((item) => [item.id, item.shortLabel, item.href]);
   return `<nav class="bottom-nav" aria-label="Mobile navigation">${navigation.map(([id, label, link]) => `<a href="${link}" data-nav-area="${id}" ${current === id ? 'aria-current="page"' : ""}><span>${label}</span>${current === id ? '<i class="nav-dot" aria-hidden="true"></i>' : ""}</a>`).join("")}</nav>`;
 }
 
@@ -309,7 +293,7 @@ function renderStickerModal() {
 }
 
 function renderShell(content, route) {
-  return `${renderHeader(route)}${study ? '<p class="study-notice">Research prototype · Progress is separate from the main app.</p>' : ""}<main id="main-content" class="app-main" tabindex="-1">${content}</main>${renderBottomNav(route)}${renderStickerModal()}`;
+  return `${renderHeader(route)}${study ? '<p class="study-notice">Research prototype · Progress is separate from the main app.</p>' : ""}<main id="main-content" class="app-main" data-view="${escapeHtml(route ? matchRoute(route).view : "")}" tabindex="-1">${content}</main>${renderBottomNav(route)}${renderStickerModal()}`;
 }
 
 function renderHome(route) {
@@ -627,7 +611,7 @@ function renderLibraryTabs(view) {
 }
 
 function isRefresherRoute(route) {
-  return !study && route.path === "/library" && route.query.get("view") === "refresher";
+  return !study && matchRoute(route).path === "/library" && route.query.get("view") === "refresher";
 }
 
 function getRefresherTopic(route) {
@@ -689,7 +673,7 @@ function answerRefresher(target) {
 
 function renderLibrary(route) {
   if (isRefresherRoute(route)) return renderRefresher(route);
-  const view = route.path === "/resources" || route.query.get("view") === "rules" ? "rules" : "skills";
+  const view = matchRoute(route).path === "/resources" || route.query.get("view") === "rules" ? "rules" : "skills";
   const situation = study === STUDY_CONDITIONS.DISCOVERY && view === "skills" ? situations.find((item) => item.id === route.query.get("situation")) : null;
   const query = libraryQuery.toLowerCase().trim();
   const topics = { "Know the Court": "Court and kitchen", "Start a Rally": "Serving and returns", "Keep Score": "Scoring", "Play the Point": "Strokes and movement", "Play Well With Others": "Etiquette and doubles", "Build a Reliable Game": "Advanced technique", "Deep-Dive Play": "Advanced play" };
@@ -721,15 +705,20 @@ function renderNotFound(route) {
 function render({ focusMain = false, lessonFocus = null } = {}) {
   const route = getRoute();
   let content;
-  if (route.path === "/" || route.path === "/home") content = renderHome(route);
-  else if (route.path === "/placement") content = renderPlacement(route);
-  else if (route.path === "/learn") content = renderLearn(route);
-  else if (route.path === "/practice") content = renderPractice(route);
-  else if (["/court", "/court-lab", "/quiz"].includes(route.path)) content = renderCourt(route);
-  else if (["/library", "/skills", "/resources"].includes(route.path)) content = renderLibrary(route);
-  else if (["/progress", "/achievements"].includes(route.path)) content = renderProgress(route);
-  else if (route.segments[0] === "lesson" && route.segments[1]) content = renderLesson(route, route.segments[1]);
-  else content = renderNotFound(route);
+  // Which page to show comes from routing/simple-router.js; app.js only renders it.
+  const match = matchRoute(route);
+  const views = {
+    home: renderHome,
+    placement: renderPlacement,
+    learn: renderLearn,
+    practice: renderPractice,
+    court: renderCourt,
+    library: renderLibrary,
+    progress: renderProgress,
+    lesson: (current) => renderLesson(current, match.params.lessonId),
+    notFound: renderNotFound,
+  };
+  content = (views[match.view] || renderNotFound)(route);
   document.querySelector("#app").innerHTML = content;
   progress.lastViewedRoute = route.raw;
   persist();
@@ -739,7 +728,7 @@ function render({ focusMain = false, lessonFocus = null } = {}) {
     (document.querySelector(lessonFocus) || document.querySelector("[data-lesson-heading]") || document.querySelector("#main-content"))?.focus();
   });
   if (focusMain && !activeSticker && !lessonFocus) requestAnimationFrame(() => {
-    const returnId = route.path === "/learn" ? route.query.get("return") : null;
+    const returnId = match.path === "/learn" ? route.query.get("return") : null;
     const row = returnId && [...document.querySelectorAll("[data-lesson-id]")].find((element) => element.dataset.lessonId === returnId);
     const refresherHeading = isRefresherRoute(route) && document.querySelector("[data-refresher-heading]");
     if (row) { const unit = row.closest("details"); if (unit) unit.open = true; row.focus(); }
@@ -750,10 +739,10 @@ function render({ focusMain = false, lessonFocus = null } = {}) {
 }
 
 function titleForRoute(route) {
-  if (route.segments[0] === "lesson") return `${getLesson(route.segments[1])?.title || "Lesson"} — Learn Pickleball`;
-  if (isRefresherRoute(route)) return `${getRefresherTopic(route)?.title || "Quick refresher"} — Learn Pickleball`;
-  const titles = { "/": "Learn Pickleball — Get court-ready", "/learn": "Learn — Learn Pickleball", "/practice": "Practice — Learn Pickleball", "/court-lab": "Court Lab — Learn Pickleball", "/court": "Court Lab — Learn Pickleball", "/library": "Library — Learn Pickleball", "/skills": "Visual skills — Learn Pickleball", "/resources": "Rules & guides — Learn Pickleball", "/progress": "Progress — Learn Pickleball", "/achievements": "Progress — Learn Pickleball" };
-  return titles[route.path] || "Learn Pickleball";
+  const match = matchRoute(route);
+  if (match.view === "lesson") return titled(resolveLesson(match.params.lessonId).lesson?.title || "Lesson");
+  if (isRefresherRoute(route)) return titled(getRefresherTopic(route)?.title || "Quick refresher");
+  return match.title;
 }
 
 function showToast(message) {
@@ -842,7 +831,7 @@ document.addEventListener("input", (event) => {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
       const route = getRoute();
-      if (!["/library", "/skills", "/resources"].includes(route.path) || isRefresherRoute(route)) return;
+      if (matchRoute(route).view !== "library" || isRefresherRoute(route)) return;
       const inputHadFocus = document.activeElement?.matches('[data-input="library-query"]');
       render();
       if (inputHadFocus) requestAnimationFrame(() => { const input = document.querySelector('[data-input="library-query"]'); input?.focus(); input?.setSelectionRange(libraryQuery.length, libraryQuery.length); });

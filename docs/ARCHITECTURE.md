@@ -29,7 +29,8 @@ The diagram groups infrastructure responsibilities; it is not a claim about the 
 | Layer | Owning files | Responsibility and boundary |
 |---|---|---|
 | App shell and presentation | [index.html](../index.html), [styles.css](../styles.css) | Loads the module, fonts/styles, skip link, storage notice, and live toast region. CSS handles responsive navigation and reduced motion. |
-| Routing, rendering, interactions | [app.js](../app.js) | Parses hash routes, renders HTML strings into `#app`, handles delegated actions, selects the next lesson, enforces gates, and awards keepsakes. UI and domain orchestration currently share one module. |
+| Navigation routing | [routing/simple-router.js](../routing/simple-router.js) | The route table (`ROUTES`: path → view, nav tab, title, one comment per route), the navigation tabs (`NAV_ITEMS`), hash parsing, route matching with `:params`, and link building. It knows nothing about rendering or progress. |
+| Rendering, interactions | [app.js](../app.js) | Maps each router view name to a render function, renders HTML strings into `#app`, handles delegated actions, selects the next lesson, enforces gates, and awards keepsakes. UI and domain orchestration currently share one module. |
 | Learning content | [content/curriculum.js](../content/curriculum.js) | Seven units, 29 lessons (20 core), page/activity data, prerequisites, sources, entry routes, Library records, and old lesson aliases. Stable IDs connect content to persisted progress. |
 | Local state | [content/progress.js](../content/progress.js) | Fresh state, normalization, storage access, page completion, attempts, and practice logs. It does not render UI or decide lesson availability. |
 | Public discovery | [learn-pickleball/](../learn-pickleball/), [public.css](../public.css), [seo.js](../seo.js) | Static article content and metadata, with links into interactive lessons. Browser script adjusts canonical/social URLs to the current origin and adds JSON-LD. |
@@ -40,7 +41,7 @@ The diagram groups infrastructure responsibilities; it is not a claim about the 
 ### Browser flow
 
 1. `index.html` loads `seo.js` and the `app.js` ES module. The app imports curriculum and progress helpers and loads normalized v2 state.
-2. `render()` reads the hash, selects a screen, replaces `#app.innerHTML`, stores `lastViewedRoute`, updates the title, and optionally focuses the main region. A saved route is a record, not automatic full-session restoration.
+2. `render()` asks the router which view the hash points to, renders that screen, replaces `#app.innerHTML`, stores `lastViewedRoute`, updates the title, and optionally focuses the main region. A saved route is a record, not automatic full-session restoration.
 3. Document-level click/input/keyboard handlers read `data-action` attributes. Actions update in-memory state, persist meaningful progress, and render again. `hashchange` clears transient answer selections and renders with main focus.
 4. Completing all required lesson pages marks the concept understood. Optional references and voluntary practice do not block concept completion. Correct answers record completion; reading pages use an explicit completion action.
 5. Next-lesson selection tries the active playlist, then a recommended unit, then the remaining available lessons. Prerequisites and diagnostic access govern availability. Completed lessons remain reviewable.
@@ -117,6 +118,8 @@ Open `http://127.0.0.1:4173/`. The static server supports the app and public HTM
 
 `npm run check` is the current build gate. It performs JavaScript syntax checks and runs proxy, SEO, font, sticker, curriculum, and app-v2 checks. These include content integrity, progress helper behavior, legacy alias expectations, source-level rendering contracts, and focused P1 summary, filter, evidence, and storage-fallback checks. They are not a full browser integration suite or accessibility certification.
 
+`npm run test:ui` (not part of the build gate) runs `tests/ui/` in headless Chrome/Chromium through the DevTools Protocol, with no npm dependencies: from a fresh root page it clicks each header tab at desktop width and taps each bottom-bar tab at phone width, then checks the URL, the rendered view (`<main data-view>`), the highlighted tab, and JavaScript errors. Set `CHROME_PATH` if Chrome is not found.
+
 The v2 gate is the maintained validation entry point. Do not treat every script in `scripts/` as an actively supported command.
 
 For UI changes, additionally exercise fresh/partial/complete progress, locked and legacy links, storage failure, Court Lab gates, modal focus, keyboard input, small screens, zoom, reduced motion, and failed images. For infrastructure changes, verify live headers, allowed/denied request behavior, and robots/sitemap responses. Use `git diff --check` for documentation and patch hygiene.
@@ -128,7 +131,8 @@ For UI changes, additionally exercise fresh/partial/complete progress, locked an
 | Add or revise a lesson | Update curriculum data, unique lesson/page IDs, prerequisites, source IDs, and art. Reuse a supported activity renderer or add an explicit branch in the app. Run curriculum/app checks and complete the lesson manually. |
 | Rename or remove content | Preserve legacy aliases and assess stored IDs/page completion before editing. A renamed ID can disappear during normalization; aliases alone do not move progress. |
 | Change completion or storage | Separate rendering rules from progress helpers, define compatibility behavior, and test fresh, saved, malformed, unavailable, and reset cases. |
-| Change navigation or layout | Update route dispatch, header/mobile active state, titles, focus behavior, and CSS together. Exercise direct and legacy URLs. |
+| Add a page or route | Add one commented entry to `ROUTES` in `routing/simple-router.js` and a render function for its view in the `views` map in `app.js` `render()`. Run `npm test` (routing compatibility, unit, and app-routing integration tests). |
+| Change navigation or layout | Update `NAV_ITEMS`/`ROUTES`, titles, focus behavior, and CSS together. Exercise direct and legacy URLs. |
 | Add a public article | Author HTML and metadata, update the SEO registry, connect canonical interactive links, and run SEO checks. Verify both raw and rendered page output. |
 | Replace artwork or fonts | Follow the [illustration guide](ILLUSTRATION_STYLE_GUIDE.md), [generation recipe](IMAGE_GENERATION_PROMPTS.md), and [visual inventory](PICKLEBALL_VISUAL_CURRICULUM.md). Keep font licenses and useful alt text. WebP copies exist, but current curriculum references often use PNG; existence alone does not mean optimized assets are served. |
 

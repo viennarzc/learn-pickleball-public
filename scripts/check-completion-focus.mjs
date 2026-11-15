@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import * as curriculum from "../content/curriculum.js";
+import * as routing from "../routing/simple-router.js";
 import * as progressModule from "../content/progress.js";
 
 const source = (await readFile(new URL("../app.js", import.meta.url), "utf8"))
   .replace(/^import\s*\{[\s\S]*?\}\s*from\s*"\.\/content\/curriculum\.js";\s*/, "")
-  .replace(/^import\s*\{[\s\S]*?\}\s*from\s*"\.\/content\/progress\.js";\s*/, "");
+  .replace(/^import\s*\{[\s\S]*?\}\s*from\s*"\.\/content\/progress\.js";\s*/, "")
+  .replace(/^import\s*\{[\s\S]*?\}\s*from\s*"\.\/routing\/[a-z-]+\.js";\s*/, "");
 const local = new Map();
 const session = new Map();
 const listeners = {};
@@ -22,7 +24,7 @@ globalThis.window = window;
 let focused = null;
 const focusable = (id, dataset = {}) => ({ dataset, focus: () => { focused = id; } });
 const context = {
-  ...curriculum, ...progressModule, URLSearchParams, console, setTimeout, clearTimeout, window,
+  ...curriculum, ...progressModule, ...routing, URLSearchParams, console, setTimeout, clearTimeout, window,
   document: {
     title: "",
     addEventListener: (type, fn) => { listeners[type] = fn; },

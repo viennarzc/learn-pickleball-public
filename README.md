@@ -124,9 +124,10 @@ Progress uses **`learn-pickleball:v2`** in browser local storage. Required pages
 ```sh
 npm ci
 npm run check
+npm run test:ui   # optional: real-browser navigation tests, needs Chrome/Chromium
 ```
 
-The validation gate checks syntax, request policy, SEO, assets, curriculum, and v2 contracts. Browser interaction and accessibility testing remain separate; see the architecture guide.
+The validation gate checks syntax, request policy, SEO, assets, curriculum, and v2 contracts. `npm run test:ui` opens the root page in headless Chrome/Chromium and clicks (desktop) or taps (mobile) every navigation tab; set `CHROME_PATH` if the browser is not found. It is not part of `npm run check`, because the Vercel build has no browser. Accessibility testing remains separate; see the architecture guide.
 
 ## Content boundaries
 

@@ -69,7 +69,7 @@ for (const lesson of lessons) visit(lesson.id);
 
 assert.deepEqual(entryRoutes.map((route) => route.id), ["never-played", "first-game-essentials", "consistency", "specific-answer"], "All four entry routes must be preserved.");
 const essentials = entryRoutes.find((route) => route.id === "first-game-essentials");
-assert.equal(essentials.lessonIds.length, 10, "The First Game Essentials playlist must contain ten lessons.");
+assert.equal(essentials.lessonIds.length, 11, "The First Game Essentials playlist must contain eleven lessons.");
 assert.ok(essentials.lessonIds.every((id) => lessonIds.has(id)), "The playlist may only use canonical lesson IDs.");
 
 const legacyIds = ["court-kitchen", "gear-grip", "ready-position", "serve-basics", "two-bounce", "return-reset", "doubles-score", "side-out", "dink-volley", "court-position", "faults-calls", "open-play", "game-ready"];
