@@ -35,7 +35,7 @@ The deployed interface is self-contained: it does not execute third-party script
 
 The production posture supports search discovery without removing the scraper guard:
 
-- Crawlable public lessons live at `/learn-pickleball/` and four topic URLs. They are regular HTML documents with unique titles, descriptions, social metadata, canonical links, and visible source attribution.
+- Crawlable pages include the lessons hub, four topic pages, and the beginner gear guide. They are regular HTML documents with unique titles, descriptions, social metadata, canonical links, and visible source attribution.
 - `/robots.txt` and `/sitemap.xml` are Vercel functions. They derive the correct production origin from each request, so the sitemap never hard-codes a preview domain.
 - Search engines and link-preview bots are not rejected merely because their user agent contains `bot`. The Routing Middleware returns `403` only for named AI collectors, common SEO-scraper products, command-line fetchers, and browser-automation clients.
 - The app and public lesson pages use only same-origin scripts, styles, images, and fonts. No learner data is sent to third parties.
@@ -57,8 +57,41 @@ Those are the platform controls for high-volume or browser-impersonating scraper
 | `/learn-pickleball/serve-basics/` | Where a pickleball serve goes |
 | `/learn-pickleball/two-bounce-rule/` | What the two-bounce rule means |
 | `/learn-pickleball/doubles-scoring/` | How to call a doubles score |
+| `/learn-pickleball/gear/` | What gear to borrow, buy, or skip before a first game |
 
-The interaction-heavy experience continues to use hash routes. The public articles are deliberately separate URLs so they can be crawled, shared, and ranked, while each routes learners into the matching interactive drill.
+The interactive experience uses hash routes. Each public guide has a shareable URL, and the topic lessons link to matching interactive drills.
+
+## Add affiliate links to the gear guide
+
+A retailer-generated link credits your affiliate account for qualifying purchases. Shoppers check out with the retailer. Check each retailer’s dashboard for clicks, qualifying orders, and earnings.
+
+1. Confirm the public production URL, then apply to the programs you want to use.
+   - **Shopee PH** requires a Philippines-based applicant with a social post in the last 14 days. Use an active public social profile and list your site as an additional website. [Shopee PH application guide](https://help.shopee.ph/portal/4/article/115728)
+   - **Lazada PH** accepts registered websites and requires approval for the site where the links appear. [Lazada PH signup overview](https://pages.lazada.com.ph/wow/i/ph/corp/affiliate-overview) · [Program terms](https://pages.lazada.com.ph/wow/i/ph/corp/affiliate-terms)
+   - **Amazon.com Associates** reviews your application after three qualifying sales within 180 days of signup. Personal orders are excluded. Apply when your public content and traffic make that window realistic. [Amazon application review](https://affiliate-program.amazon.com/help/node/topic/G8TW5AE9XL2VX9VM)
+2. Confirm your program allows affiliate links on that domain. Generate a product link in the affiliate portal, using the [Shopee link generator](https://help.shopee.ph/portal/10/article/123992-How-to-generate-your-Link), the Lazada affiliate dashboard, or [Amazon SiteStripe](https://affiliate-program.amazon.com/help/node/topic/GJMMT7G4C8K4Y3AY).
+3. Paste the sample below at the affiliate product listings comment in [`learn-pickleball/gear/index.html`](learn-pickleball/gear/index.html). Replace the example URLs with the exact HTTPS links the retailer issues, writing `&amp;` for any `&` in the HTML attribute. Keep the paid-link labels and `rel="sponsored"`. Write why the product fits a beginner and let the retailer show current prices and stock.
+4. Keep only markets and retailers with active links. Use **Philippines** for Shopee PH and Lazada PH, and **United States** for Amazon.com. Keep the commission sentence above the links. Add “As an Amazon Associate I earn from qualifying purchases.” beside it whenever Amazon links are present. [Amazon Associates agreement](https://affiliate-program.amazon.com/help/operating/agreement/) · [Google guidance on sponsored links](https://developers.google.com/search/docs/crawling-indexing/qualify-outbound-links)
+5. Run `npm run check` and verify the exact product and storefront on desktop and mobile before deploying. Remove links for unavailable products or ended programs. Remove the shopping section once its last link is gone.
+
+```html
+<section aria-labelledby="gear-picks">
+  <h2 id="gear-picks">Where to shop</h2>
+  <p>We may earn a commission if you buy through these links.</p>
+  <!-- Add the Amazon Associates disclosure here when Amazon links are present. -->
+  <h3>Product name and model</h3>
+  <p>Describe who it suits and why.</p>
+  <h4>Philippines</h4>
+  <ul>
+    <li><a href="https://example.invalid/shopee-link" rel="sponsored">Product name on Shopee PH (paid link)</a></li>
+    <li><a href="https://example.invalid/lazada-link" rel="sponsored">Product name on Lazada PH (paid link)</a></li>
+  </ul>
+  <h4>United States</h4>
+  <ul>
+    <li><a href="https://example.invalid/amazon-link" rel="sponsored">Product name on Amazon.com (paid link)</a></li>
+  </ul>
+</section>
+```
 
 ## Current app routes
 

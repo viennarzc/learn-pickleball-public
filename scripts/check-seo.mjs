@@ -6,10 +6,12 @@ import { createSitemap } from "../api/sitemap.js";
 
 const root = new URL("../", import.meta.url);
 const routeFile = (path) => path === "/" ? "index.html" : `${path.slice(1)}index.html`;
+const gearPath = "/learn-pickleball/gear/";
+assert.ok(PUBLIC_SEO_PAGES.some(({ path }) => path === gearPath), "The gear guide belongs in the public sitemap");
 
 for (const { path, updated } of PUBLIC_SEO_PAGES) {
   const html = await readFile(new URL(routeFile(path), root), "utf8");
-  assert.equal(updated, "2026-09-01", `${path} needs the current sitemap lastmod date`);
+  assert.match(updated, /^\d{4}-\d{2}-\d{2}$/, `${path} needs a sitemap lastmod date`);
   assert.match(html, /<title>[^<]+<\/title>/i, `${path} needs a title`);
   assert.match(html, /<meta\s+name="description"\s+content="[^"]+"/i, `${path} needs a description`);
   assert.match(html, /<link rel="canonical" href="https:\/\/[^\"]+"/i, `${path} needs an absolute canonical link`);
@@ -18,7 +20,7 @@ for (const { path, updated } of PUBLIC_SEO_PAGES) {
   assert.match(html, /<meta property="og:image" content="https:\/\/[^\"]+"/i, `${path} needs an absolute Open Graph image`);
   assert.match(html, /<script defer src="\/?seo\.js\?v=1"><\/script>/i, `${path} needs dynamic production canonical and structured data support`);
   assert.doesNotMatch(html, /name="robots" content="[^">]*noindex/i, `${path} must be indexable`);
-  assert.match(html, /data-seo-reviewed="2026-09-01"/i, `${path} needs the matching source/review date`);
+  assert.ok(html.includes(`data-seo-reviewed="${updated}"`), `${path} needs the matching source/review date`);
 }
 
 const origin = "https://learn-pickleball.example";
@@ -33,8 +35,10 @@ for (const host of ["example.com:99999", ".", "example.com:65536"]) {
 }
 const sitemap = createSitemap(origin);
 assert.match(sitemap, /^<\?xml version="1\.0" encoding="UTF-8"\?>/);
-for (const { path } of PUBLIC_SEO_PAGES) {
-  assert.match(sitemap, new RegExp(`https://learn-pickleball\\.example${path === "/" ? "/" : path.replaceAll("/", "\\/")}`));
+for (const { path, updated } of PUBLIC_SEO_PAGES) {
+  const entry = `<loc>${origin}${path}</loc>`;
+  const url = sitemap.split("</url>").find((item) => item.includes(entry));
+  assert.ok(url?.includes(`<lastmod>${updated}</lastmod>`), `${path} needs a sitemap entry with its own review date`);
 }
 
 const robots = createRobots(origin);

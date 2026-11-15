@@ -1,6 +1,7 @@
 export const PUBLIC_SEO_PAGES = [
   { path: "/", updated: "2026-09-01" },
   { path: "/learn-pickleball/", updated: "2026-09-01" },
+  { path: "/learn-pickleball/gear/", updated: "2026-11-15" },
   { path: "/learn-pickleball/kitchen-rules/", updated: "2026-09-01" },
   { path: "/learn-pickleball/serve-basics/", updated: "2026-09-01" },
   { path: "/learn-pickleball/two-bounce-rule/", updated: "2026-09-01" },
