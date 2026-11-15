@@ -51,37 +51,99 @@ export function createFreshProgress() {
   };
 }
 
+// --- Normalization helpers -------------------------------------------------
+// Stored progress comes from localStorage, so every field may be missing,
+// malformed, or left over from an older preview. Each helper below accepts a
+// raw value and returns a safe value; normalizeProgress composes them in order.
+
+const courtZoneSet = new Set(courtZoneValues);
+
+export function isObject(value) {
+  return Boolean(value) && typeof value === "object";
+}
+
+export function objectOrEmpty(value) {
+  return isObject(value) ? value : {};
+}
+
+export function arrayOrEmpty(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+export function uniqueArrayOrEmpty(value) {
+  return [...new Set(arrayOrEmpty(value))];
+}
+
+export function stringOrDefault(value, fallback) {
+  return typeof value === "string" ? value : fallback;
+}
+
+// Step 1: only a progress object written by the current app version is kept.
+export function isCurrentProgress(value) {
+  return isObject(value) && value.version === APP_VERSION;
+}
+
+// Step 2a: drop stored lessons that no longer exist in the curriculum.
+export function selectKnownLessons(lessonProgress, lessonIds) {
+  return Object.entries(objectOrEmpty(lessonProgress))
+    .filter(([id]) => lessonIds.has(id));
+}
+
+// Step 2b: give one stored lesson the same shape as a fresh lesson record.
+export function normalizeLessonEntry(lesson) {
+  const stored = objectOrEmpty(lesson);
+  return {
+    requiredPages: uniqueArrayOrEmpty(stored.requiredPages),
+    optionalPages: uniqueArrayOrEmpty(stored.optionalPages),
+    attempts: objectOrEmpty(stored.attempts),
+    conceptUnderstood: Boolean(stored.conceptUnderstood),
+    practiceLogs: arrayOrEmpty(stored.practiceLogs),
+  };
+}
+
+// Step 2: known lessons (2a) are normalized one by one (2b).
+export function normalizeLessonProgress(lessonProgress, lessonIds) {
+  const knownLessons = selectKnownLessons(lessonProgress, lessonIds);
+  return Object.fromEntries(knownLessons.map(([id, lesson]) => [id, normalizeLessonEntry(lesson)]));
+}
+
+// Step 3a: keep each valid court zone once.
+export function normalizeCourtVisited(courtVisited) {
+  return uniqueArrayOrEmpty(courtVisited).filter((zone) => courtZoneSet.has(zone));
+}
+
+// Step 3b: depends on the *normalized* results of step 3a and the map check.
+// Earlier v2 previews unlocked Court Lab after zone visits alone. A current
+// completion always represents both spatial exploration and the map check.
+export function isCourtExplored(courtExplored, courtKnowledgePassed, courtVisited) {
+  return Boolean(courtExplored)
+    && courtKnowledgePassed
+    && courtVisited.length === courtZoneSet.size;
+}
+
+// Step 3: court fields must be normalized in this order (visited -> passed -> explored).
+export function normalizeCourtProgress(value) {
+  const courtVisited = normalizeCourtVisited(value.courtVisited);
+  const courtKnowledgePassed = Boolean(value.courtKnowledgePassed);
+  const courtExplored = isCourtExplored(value.courtExplored, courtKnowledgePassed, courtVisited);
+  return { courtVisited, courtKnowledgePassed, courtExplored };
+}
+
 export function normalizeProgress(value, lessonIds = new Set()) {
-  if (!value || value.version !== APP_VERSION || typeof value !== "object") return createFreshProgress();
-  const base = createFreshProgress();
-  const lessonProgress = value.lessonProgress && typeof value.lessonProgress === "object" ? value.lessonProgress : {};
-  base.entryRouteId = typeof value.entryRouteId === "string" ? value.entryRouteId : null;
-  base.activePlaylistId = typeof value.activePlaylistId === "string" ? value.activePlaylistId : null;
-  base.placementAnswers = value.placementAnswers && typeof value.placementAnswers === "object" ? value.placementAnswers : {};
-  base.diagnosticAnswers = value.diagnosticAnswers && typeof value.diagnosticAnswers === "object" ? value.diagnosticAnswers : {};
-  base.lessonProgress = Object.fromEntries(Object.entries(lessonProgress)
-    .filter(([id]) => lessonIds.has(id))
-    .map(([id, item]) => [id, {
-      requiredPages: Array.isArray(item?.requiredPages) ? [...new Set(item.requiredPages)] : [],
-      optionalPages: Array.isArray(item?.optionalPages) ? [...new Set(item.optionalPages)] : [],
-      attempts: item?.attempts && typeof item.attempts === "object" ? item.attempts : {},
-      conceptUnderstood: Boolean(item?.conceptUnderstood),
-      practiceLogs: Array.isArray(item?.practiceLogs) ? item.practiceLogs : [],
-    }]));
-  base.practiceLogs = Array.isArray(value.practiceLogs) ? value.practiceLogs : [];
-  const validCourtZones = new Set(courtZoneValues);
-  base.courtVisited = Array.isArray(value.courtVisited)
-    ? [...new Set(value.courtVisited.filter((zone) => validCourtZones.has(zone)))]
-    : [];
-  base.courtKnowledgePassed = Boolean(value.courtKnowledgePassed);
-  // Earlier v2 previews unlocked Court Lab after zone visits alone. A current
-  // completion always represents both spatial exploration and the map check.
-  base.courtExplored = Boolean(value.courtExplored)
-    && base.courtKnowledgePassed
-    && base.courtVisited.length === validCourtZones.size;
-  base.earnedStickers = Array.isArray(value.earnedStickers) ? [...new Set(value.earnedStickers)] : [];
-  base.lastViewedRoute = typeof value.lastViewedRoute === "string" ? value.lastViewedRoute : "#/";
-  return base;
+  const fresh = createFreshProgress();
+  if (!isCurrentProgress(value)) return fresh;
+  return {
+    ...fresh,
+    entryRouteId: stringOrDefault(value.entryRouteId, fresh.entryRouteId),
+    activePlaylistId: stringOrDefault(value.activePlaylistId, fresh.activePlaylistId),
+    placementAnswers: objectOrEmpty(value.placementAnswers),
+    diagnosticAnswers: objectOrEmpty(value.diagnosticAnswers),
+    lessonProgress: normalizeLessonProgress(value.lessonProgress, lessonIds),
+    practiceLogs: arrayOrEmpty(value.practiceLogs),
+    ...normalizeCourtProgress(value),
+    earnedStickers: uniqueArrayOrEmpty(value.earnedStickers),
+    lastViewedRoute: stringOrDefault(value.lastViewedRoute, fresh.lastViewedRoute),
+  };
 }
 
 export function loadProgress(lessonIds, key = STORE_KEY) {
@@ -92,48 +154,53 @@ export function loadProgress(lessonIds, key = STORE_KEY) {
   }
 }
 
-export function saveProgress(progress, key = STORE_KEY) {
+// Runs one localStorage write and reports whether it succeeded. Storage can be
+// missing (no window), blocked (private mode), or full, and progress may fail
+// to serialize; callers show a notice instead of crashing.
+function tryStorageWrite(write) {
   try {
-    window.localStorage.setItem(key, JSON.stringify(progress));
+    write(window.localStorage);
     return true;
   } catch {
     return false;
   }
+}
+
+export function saveProgress(progress, key = STORE_KEY) {
+  return tryStorageWrite((storage) => storage.setItem(key, JSON.stringify(progress)));
 }
 
 export function clearProgress(key = STORE_KEY) {
-  try {
-    window.localStorage.removeItem(key);
-    return true;
-  } catch {
-    return false;
-  }
+  return tryStorageWrite((storage) => storage.removeItem(key));
+}
+
+function createFreshLessonProgress() {
+  return {
+    requiredPages: [],
+    optionalPages: [],
+    attempts: {},
+    conceptUnderstood: false,
+    practiceLogs: [],
+  };
 }
 
 export function getLessonProgress(progress, lessonId) {
-  if (!progress.lessonProgress[lessonId]) {
-    progress.lessonProgress[lessonId] = {
-      requiredPages: [],
-      optionalPages: [],
-      attempts: {},
-      conceptUnderstood: false,
-      practiceLogs: [],
-    };
-  }
+  if (!progress.lessonProgress[lessonId]) progress.lessonProgress[lessonId] = createFreshLessonProgress();
   return progress.lessonProgress[lessonId];
 }
 
 export function recordPage(progress, lessonId, pageId, { required = true } = {}) {
   const lesson = getLessonProgress(progress, lessonId);
-  const target = required ? lesson.requiredPages : lesson.optionalPages;
-  if (!target.includes(pageId)) target.push(pageId);
+  const pages = required ? lesson.requiredPages : lesson.optionalPages;
+  if (!pages.includes(pageId)) pages.push(pageId);
 }
 
 export function recordAttempt(progress, lessonId, activityId, correct) {
   const lesson = getLessonProgress(progress, lessonId);
   const previous = lesson.attempts[activityId] || { count: 0, correct: false };
-  lesson.attempts[activityId] = { count: previous.count + 1, correct: previous.correct || Boolean(correct) };
-  return lesson.attempts[activityId];
+  const attempt = { count: previous.count + 1, correct: previous.correct || Boolean(correct) };
+  lesson.attempts[activityId] = attempt;
+  return attempt;
 }
 
 export function recordPractice(progress, lessonId, mode) {

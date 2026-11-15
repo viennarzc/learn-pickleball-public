@@ -13,6 +13,7 @@ import {
   recordPractice,
   saveProgress,
 } from "../content/progress.js";
+import { NAV_ITEMS, matchRoute, parseRoute } from "../routing/simple-router.js";
 
 const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
 const index = await readFile(new URL("../index.html", import.meta.url), "utf8");
@@ -52,9 +53,9 @@ assert.ok(storage.has("learn-pickleball"), "Reset must leave the legacy v1 key u
 assert.ok(!storage.has(STORE_KEY), "Reset must clear v2 only.");
 
 for (const [key, label] of [["learn", "Learn"], ["practice", "Practice"], ["court", "Court Lab"], ["library", "Library"], ["progress", "Progress"]]) {
-  assert.ok(app.includes(`"${key}", "${label}"`), `Navigation needs ${label}.`);
+  assert.ok(NAV_ITEMS.some((item) => item.id === key && item.label === label), `Navigation needs ${label}.`);
 }
-for (const route of ["/practice", "/court-lab", "/library", "/progress", "/skills", "/resources", "/achievements"]) assert.ok(app.includes(`"${route}"`) || app.includes(`'${route}'`), `Compatible route ${route} is missing.`);
+for (const route of ["/practice", "/court-lab", "/library", "/progress", "/skills", "/resources", "/achievements"]) assert.notEqual(matchRoute(parseRoute(`#${route}`)).view, "notFound", `Compatible route ${route} is missing.`);
 for (const marker of ["renderLesson", "renderPractice", "renderCourt", "renderLibrary", "renderProgress", "renderInstructionalPlate", "data-action=\"page-answer\"", "data-action=\"practice-log\""]) assert.ok(app.includes(marker), `App is missing ${marker}.`);
 for (const marker of ["renderCourtSvg", "tabindex=\"0\"", "court-zone", "kitchen-answer", "court-check-answer", "courtKnowledgePassed", "completeCourtLabGate", "court-mode", "event.key === \"Enter\""]) assert.ok(app.includes(marker), `Court Lab behavior is missing ${marker}.`);
 assert.ok(app.includes('route.path === "/resources"'), "The legacy Resources route must open Rules & guides.");

@@ -449,7 +449,7 @@ export const curriculumUnits = [unit1, unit2, unit3, unit4, unit5, unit6, unit7]
 
 export const entryRoutes = [
   { id: "never-played", label: "I have never played", detail: "Start with court orientation and a safe setup.", route: "unit", resultTitle: "A calm first route.", resultBody: "Begin with court landmarks, a safe setup, and a manageable first rally." },
-  { id: "first-game-essentials", label: "I need to play soon", detail: "Follow a 45–60 minute first-game essentials playlist.", route: "playlist", resultTitle: "First Game Essentials", resultBody: "This practical playlist keeps the rule and court context needed for a first game in one useful order.", lessonIds: ["court-orientation", "ready-position", "kitchen-rule", "serve-legally", "two-bounce-opening", "opening-rally", "doubles-scoring", "rotation-positions", "fair-calls", "first-game-rehearsal"] },
+  { id: "first-game-essentials", label: "I need to play soon", detail: "Follow a 45–60 minute first-game essentials playlist.", route: "playlist", resultTitle: "First Game Essentials", resultBody: "This practical playlist keeps the rule and court context needed for a first game in one useful order.", lessonIds: ["court-orientation", "equipment-safety", "ready-position", "kitchen-rule", "serve-legally", "two-bounce-opening", "opening-rally", "doubles-scoring", "rotation-positions", "fair-calls", "first-game-rehearsal"] },
   { id: "consistency", label: "I play but lack consistency", detail: "Use five short questions to find Unit 4 or a deep-dive recommendation.", route: "diagnostic", resultTitle: "A useful next focus.", resultBody: "Your answers guide a Unit 4 or Unit 6 recommendation. This is orientation, not a rating." },
   { id: "specific-answer", label: "I want a specific answer", detail: "Search official rules, visual skills, drills, and sources without enrolling in a path.", route: "library", resultTitle: "Find the answer you need.", resultBody: "The Library separates current-rule answers from coaching options and keeps sources visible." },
 ];
@@ -477,7 +477,10 @@ export const refresherTopics = [
   { guideId: "score-guide", title: "Doubles scoring", pageId: "score-call", showScenarioContext: true, explanation: "Call the serving team’s 4 first, the receiving team’s 2 next, then 2 for the second server." },
 ];
 
-export const legacyLessonAliases = {
+// Legacy ids arrive from old links and hand-typed URLs. The table has no
+// prototype, so a lookup such as legacyLessonAliases["constructor"] finds
+// nothing instead of a built-in Object property.
+export const legacyLessonAliases = Object.assign(Object.create(null), {
   "court-kitchen": { defaultLessonId: "court-orientation", unfinished: ["court-orientation", "kitchen-rule"] },
   "gear-grip": { defaultLessonId: "equipment-safety", unfinished: ["equipment-safety", "ready-position"] },
   "ready-position": "ready-position",
@@ -491,7 +494,7 @@ export const legacyLessonAliases = {
   "faults-calls": "fair-calls",
   "open-play": "open-play",
   "game-ready": "first-game-rehearsal",
-};
+});
 
 export function getAllLessons() {
   return curriculumUnits.flatMap((unit) => unit.lessons.map((item) => ({ ...item, unitId: unit.id, unitNumber: unit.number, optional: Boolean(item.optional || unit.optional) })));

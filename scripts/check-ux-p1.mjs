@@ -2,17 +2,19 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import * as curriculum from "../content/curriculum.js";
+import * as routing from "../routing/simple-router.js";
 import * as progressModule from "../content/progress.js";
 
 const source = (await readFile(new URL("../app.js", import.meta.url), "utf8"))
   .replace(/^import\s*\{[\s\S]*?\}\s*from\s*"\.\/content\/curriculum\.js";\s*/, "")
-  .replace(/^import\s*\{[\s\S]*?\}\s*from\s*"\.\/content\/progress\.js";\s*/, "");
+  .replace(/^import\s*\{[\s\S]*?\}\s*from\s*"\.\/content\/progress\.js";\s*/, "")
+  .replace(/^import\s*\{[\s\S]*?\}\s*from\s*"\.\/routing\/[a-z-]+\.js";\s*/, "");
 const session = new Map();
 const store = new Map();
 const listeners = {};
 const app = { innerHTML: "" };
 const context = {
-  ...curriculum, ...progressModule, URLSearchParams, console, setTimeout, clearTimeout,
+  ...curriculum, ...progressModule, ...routing, URLSearchParams, console, setTimeout, clearTimeout,
   window: { location: { hash: "#/" }, localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k,v) => store.set(k,v), removeItem: (k) => store.delete(k) }, sessionStorage: { getItem: (k) => session.get(k) ?? null, setItem: (k,v) => session.set(k,v) }, addEventListener() {} },
   document: { querySelector: (s) => s === "#app" ? app : null, addEventListener: (type,fn) => { listeners[type] = fn; }, title: "" },
   requestAnimationFrame() {},
