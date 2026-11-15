@@ -58,7 +58,7 @@ for (const [key, label] of [["learn", "Learn"], ["practice", "Practice"], ["cour
 for (const route of ["/practice", "/court-lab", "/library", "/progress", "/skills", "/resources", "/achievements"]) assert.notEqual(matchRoute(parseRoute(`#${route}`)).view, "notFound", `Compatible route ${route} is missing.`);
 for (const marker of ["renderLesson", "renderPractice", "renderCourt", "renderLibrary", "renderProgress", "renderInstructionalPlate", "data-action=\"page-answer\"", "data-action=\"practice-log\""]) assert.ok(app.includes(marker), `App is missing ${marker}.`);
 for (const marker of ["renderCourtSvg", "tabindex=\"0\"", "court-zone", "kitchen-answer", "court-check-answer", "courtKnowledgePassed", "completeCourtLabGate", "court-mode", "event.key === \"Enter\""]) assert.ok(app.includes(marker), `Court Lab behavior is missing ${marker}.`);
-assert.ok(app.includes('route.path === "/resources"'), "The legacy Resources route must open Rules & guides.");
+assert.ok(app.includes('matchRoute(route).path === "/resources"'), "The legacy Resources route must use its canonical router path to open Rules & guides.");
 for (const lesson of getAllLessons()) assert.ok(app.includes("href(`/lesson/${lesson.id}`)"), `${lesson.id} must render through the canonical generic lesson route.`);
 
 for (const alias of ["court-kitchen", "gear-grip", "serve-basics", "two-bounce", "return-reset", "doubles-score", "side-out", "dink-volley", "court-position", "faults-calls", "open-play", "game-ready"]) {
