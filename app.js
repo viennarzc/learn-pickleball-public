@@ -2,6 +2,7 @@ import {
   curriculumUnits,
   sourceRegister,
   libraryEntries,
+  refresherTopics,
   legacyLessonAliases,
   entryRoutes,
   getAllLessons,
@@ -39,6 +40,16 @@ const entryFallbacks = [
   { id: "specific-answer", label: "I want a specific answer", detail: "Search rules, skills, drills, and sources without enrolling in a path.", route: "library" },
 ];
 const entryOptions = routeEntries.length ? routeEntries : entryFallbacks;
+const beginnerGoals = {
+  "never-played": { label: "I’m new to pickleball", detail: "Start with court orientation and learn the basics in order." },
+  "first-game-essentials": { label: "I’m preparing for my first game", detail: "Follow First Game Essentials for serving, scoring, and a first-game rehearsal." },
+};
+const refresherGuides = refresherTopics.map((topic) => {
+  const guide = libraryEntries.find((entry) => entry.id === topic.guideId);
+  const lesson = getLesson(guide.lessonId);
+  const page = lesson.pages.find((item) => item.id === topic.pageId);
+  return { ...topic, guide, lesson, page };
+});
 const diagnosticQuestions = [
   { id: "serve", prompt: "Can you usually identify a legal serve destination?", options: ["Not yet", "Usually", "Confidently"] },
   { id: "rally", prompt: "Can you explain the two-bounce opening?", options: ["Not yet", "Mostly", "Confidently"] },
@@ -112,6 +123,15 @@ function href(path, query) {
   return `#${prefix}${query ? `?${new URLSearchParams(query).toString()}` : ""}`;
 }
 
+function refresherHref(topic) {
+  return href("/library", topic ? { view: "refresher", topic } : { view: "refresher" });
+}
+
+function refresherLink(label = "Quick refresher", { topic, primary = false } = {}) {
+  const priority = primary ? "primary" : "quiet";
+  return `<a class="button button-${priority}" data-cta-priority="${priority}" href="${escapeHtml(refresherHref(topic))}">${escapeHtml(label)}</a>`;
+}
+
 function persist() {
   if (!saveProgress(progress, currentProgressKey)) document.querySelector("#storage-notice")?.removeAttribute("hidden");
 }
@@ -139,6 +159,14 @@ function requiredPages(lesson) {
 function isLessonComplete(lesson) {
   const stored = progress.lessonProgress[lesson.id];
   return Boolean(stored?.conceptUnderstood);
+}
+
+function hasLessonActivity(stored) {
+  return Boolean(stored && (stored.conceptUnderstood || stored.requiredPages.length || stored.optionalPages.length || Object.keys(stored.attempts).length));
+}
+
+function hasLearningActivity() {
+  return Boolean(progress.entryRouteId) || (!study && Object.values(progress.lessonProgress).some(hasLessonActivity));
 }
 
 function prerequisitesFor(lesson) {
@@ -284,23 +312,34 @@ function renderShell(content, route) {
 
 function renderHome(route) {
   const next = getNextLesson();
-  if (!progress.entryRouteId) {
+  if (!hasLearningActivity()) {
     return renderShell(`
       <section class="screen-intro page">
         <div>
           <p class="eyebrow">A calm way to learn</p><h1>Learn the game, one useful step at a time.</h1>
           <p class="lede">Friendly, source-aware lessons for the court, the first rally, and the decisions that make play feel easier.</p>
-          <div class="button-row"><a class="button button-primary" data-cta-priority="primary" href="#/placement">Find my starting point</a><a class="button button-quiet" data-cta-priority="quiet" href="#/library?view=rules">Look up a rule</a></div>
+          <div class="button-row"><a class="button button-primary" data-cta-priority="primary" href="#/placement">${study ? "Find my starting point" : "Start learning"}</a>${study ? '<a class="button button-quiet" data-cta-priority="quiet" href="#/library?view=rules">Look up a rule</a>' : refresherLink()}</div>
           <p class="inline-progress"><span>Short digital lessons</span><span>Practice is always optional</span><span>No account required</span></p>
         </div>
         <figure class="hero-figure"><img src="assets/illustrations/stances-ready-v2.png" alt="Four adult pickleball players demonstrate balanced ready positions." /></figure>
       </section>
-      <section class="page next-strip"><span class="status is-current">Start here</span><div><strong>Choose a route that fits today.</strong><span>New to pickleball, playing soon, building consistency, or looking up one answer.</span></div><a class="button button-quiet" data-cta-priority="quiet" href="#/placement">Choose route</a></section>`, route);
+      ${study ? '<section class="page next-strip"><span class="status is-current">Start here</span><div><strong>Choose a route that fits today.</strong><span>New to pickleball, playing soon, building consistency, or looking up one answer.</span></div><a class="button button-quiet" data-cta-priority="quiet" href="#/placement">Choose route</a></section>' : ""}`, route);
   }
   const unit = next ? getUnit(next) : null;
+  const stored = next && progress.lessonProgress[next.id];
+  const resume = study ? stored?.requiredPages.length : hasLessonActivity(stored);
+  const goalAction = !study && !progress.entryRouteId && hasLearningActivity()
+    ? '<a class="button button-quiet" data-cta-priority="quiet" href="#/placement">Choose a learning goal</a>'
+    : "";
+  const reviewCompleted = '<a class="button button-quiet" href="#/learn?review=completed">Review completed lessons</a>';
+  const homeActions = next
+    ? `<a class="button button-primary" data-cta-priority="primary" href="${href(`/lesson/${next.id}`)}">${resume ? "Resume lesson" : "Start lesson"}</a>`
+    : study
+      ? '<a class="button button-primary" data-cta-priority="primary" href="#/learn?review=completed">Review completed lessons</a>'
+      : refresherLink("Quick refresher", { primary: true }) + reviewCompleted;
   return renderShell(`
     <section class="screen-intro page">
-      <div><p class="eyebrow">Your next learning step</p><h1>${next ? escapeHtml(next.title) : "You have built a reliable foundation."}</h1><p class="lede">${next ? escapeHtml(next.outcome || next.summary) : "Review a rule, add a practice note, or choose an optional deep-dive topic when it feels useful."}</p><p class="session-duration">${next ? `Estimated time: ${escapeHtml(next.duration || "Short lesson")}` : "Review what you have learned or find another topic."}</p><div class="button-row">${next ? `<a class="button button-primary" data-cta-priority="primary" href="${href(`/lesson/${next.id}`)}">${progress.lessonProgress[next.id]?.requiredPages?.length ? "Resume lesson" : "Start lesson"}</a>` : '<a class="button button-primary" data-cta-priority="primary" href="#/learn?review=completed">Review completed lessons</a>'}<a class="button button-quiet" data-cta-priority="quiet" href="#/learn">View full path</a><a class="button button-quiet" href="#/library?view=rules">Find a rule or skill</a></div><p class="inline-progress"><span>${completedLessonCount()} concept steps understood</span><span>${practiceCount()} practices logged</span></p></div>
+      <div><p class="eyebrow">Your next learning step</p><h1>${next ? escapeHtml(next.title) : "You have built a reliable foundation."}</h1><p class="lede">${next ? escapeHtml(next.outcome || next.summary) : "Review a rule, add a practice note, or choose an optional deep-dive topic when it feels useful."}</p><p class="session-duration">${next ? `Estimated time: ${escapeHtml(next.duration || "Short lesson")}` : "Review what you have learned or find another topic."}</p><div class="button-row">${homeActions}<a class="button button-quiet" data-cta-priority="quiet" href="#/learn">View full path</a>${goalAction}${study ? '<a class="button button-quiet" href="#/library?view=rules">Find a rule or skill</a>' : next ? refresherLink() : ""}</div><p class="inline-progress"><span>${completedLessonCount()} concept steps understood</span><span>${practiceCount()} practices logged</span></p></div>
       <figure class="hero-figure"><img src="${escapeHtml(normalizeImage(next?.illustration, next)?.src || "assets/hero-rally.png")}" alt="${escapeHtml(normalizeImage(next?.illustration, next)?.alt || "Pickleball players learning together.")}" /></figure>
     </section>
     <section class="page next-strip"><span class="status is-current">${unit ? `Unit ${unit.number}` : "Review"}</span><div><strong>${next ? `${escapeHtml(next.duration || "Short lesson")} · ${escapeHtml(next.kind || "Guided lesson")}` : "Your path remains open."}</strong><span>${next ? "One focused idea, then a clear next move." : "Optional units never block your beginner completion."}</span></div>${next ? `<a class="button button-quiet" data-cta-priority="quiet" href="#/practice">Open practice</a>` : ""}</section>`, route);
@@ -310,7 +349,11 @@ function renderPlacement(route) {
   const selected = progress.entryRouteId;
   const routeOption = getEntry(selected);
   if (!selected) {
-    return renderShell(`<section class="placement"><div class="placement-progress"><span class="is-current"></span><span></span><span></span></div><div class="placement-question"><p class="eyebrow">Choose your route</p><h1>What would help you most today?</h1><p class="lede">This is not a rating. It only chooses a useful first view, and you can change it later.</p><div class="choice-list">${entryOptions.map((entry, index) => `<button type="button" class="choice-row" data-action="set-entry" data-entry="${escapeHtml(entry.id)}"><span class="choice-mark">${index + 1}</span><span><strong>${escapeHtml(entry.label || entry.title)}</strong><small>${escapeHtml(entry.detail || entry.description || "Choose this route")}</small></span></button>`).join("")}</div></div></section>`, route);
+    const choices = entryOptions.map((entry, index) => {
+      const goal = (!study && beginnerGoals[entry.id]) || entry;
+      return `<button type="button" class="choice-row" data-action="set-entry" data-entry="${escapeHtml(entry.id)}">${study ? `<span class="choice-mark">${index + 1}</span>` : ""}<span><strong>${escapeHtml(goal.label || goal.title)}</strong><small>${escapeHtml(goal.detail || goal.description || "Choose this route")}</small></span></button>`;
+    }).join("");
+    return renderShell(`<section class="placement">${study ? '<div class="placement-progress"><span class="is-current"></span><span></span><span></span></div>' : ""}<div class="placement-question${study ? "" : " placement-goals"}"><p class="eyebrow">${study ? "Choose your route" : "Choose a learning goal"}</p><h1>What would help you most today?</h1><p class="lede">${study ? "This is not a rating. It only chooses a useful first view, and you can change it later." : "Choose a goal to see where to begin. You can change your choice later."}</p><div class="choice-list">${choices}</div></div></section>`, route);
   }
   if (selected === "consistency" && diagnosticQuestions.some((item) => !Object.hasOwn(progress.diagnosticAnswers, item.id))) {
     const question = diagnosticQuestions.find((item) => !Object.hasOwn(progress.diagnosticAnswers, item.id));
@@ -352,8 +395,16 @@ function renderLearn(route) {
   const completedList = completedLessons();
   const completed = completedList.length;
   const atlasOpen = study === "atlas" && route.query.get("view") === "atlas";
+  const learnAction = !study && !hasLearningActivity()
+    ? '<a class="button button-primary" data-cta-priority="primary" href="#/placement">Choose a learning goal</a>'
+    : next
+      ? `<a class="button button-primary" data-cta-priority="primary" href="${href(`/lesson/${next.id}`)}">Continue: ${escapeHtml(next.title)}</a>`
+      : '<a class="button button-primary" data-cta-priority="primary" href="#/library?view=skills">Choose a deep dive</a>';
+  const goalAction = !study && !progress.entryRouteId && hasLearningActivity()
+    ? '<a class="button button-quiet" data-cta-priority="quiet" href="#/placement">Choose a learning goal</a>'
+    : "";
   return renderShell(`
-    <section class="screen-intro page path-intro"><div><p class="eyebrow">Your learning path</p><h1>One calm step closer to court-ready.</h1><p class="lede">Build court skills one step at a time, or find the topic you need.</p><div class="button-row">${next ? `<a class="button button-primary" data-cta-priority="primary" href="${href(`/lesson/${next.id}`)}">Continue: ${escapeHtml(next.title)}</a>` : '<a class="button button-primary" data-cta-priority="primary" href="#/library?view=skills">Choose a deep dive</a>'}<a class="button button-quiet" href="#/learn?review=completed">Review completed lessons</a><a class="button button-quiet" href="#/library?view=rules">Find a rule or skill</a></div><p class="inline-progress"><span>${completed} of ${lessons.filter((lesson) => !isOptional(lesson)).length} core concepts understood</span><span>${practiceCount()} practice logs</span></p></div><figure class="hero-figure hero-figure-stance"><img src="assets/illustrations/stances-ready-v2.png" alt="Four adult players demonstrate balanced ready positions." /></figure></section>
+    <section class="screen-intro page path-intro"><div><p class="eyebrow">Your learning path</p><h1>One calm step closer to court-ready.</h1><p class="lede">Build court skills one step at a time, or find the topic you need.</p><div class="button-row">${learnAction}<a class="button button-quiet" href="#/learn?review=completed">Review completed lessons</a>${goalAction}${study ? '<a class="button button-quiet" href="#/library?view=rules">Find a rule or skill</a>' : refresherLink()}</div><p class="inline-progress"><span>${completed} of ${lessons.filter((lesson) => !isOptional(lesson)).length} core concepts understood</span><span>${practiceCount()} practice logs</span></p></div><figure class="hero-figure hero-figure-stance"><img src="assets/illustrations/stances-ready-v2.png" alt="Four adult players demonstrate balanced ready positions." /></figure></section>
     ${route.query.get("review") === "completed" ? `<section class="page review-list" aria-labelledby="review-heading"><h2 id="review-heading">Completed lessons</h2>${completedList.length ? completedList.map((lesson) => `<a class="review-link" href="${href(`/lesson/${lesson.id}`)}">${escapeHtml(lesson.title)} <span>Review</span></a>`).join("") : '<p>No completed lessons yet. Your completed lessons will appear here.</p>'}</section>` : ""}
     ${study === "discovery" ? `<section class="page study-goals" aria-labelledby="study-goals-title"><h2 id="study-goals-title">Choose what helps today</h2><p>Choose a starting route or explore a situation. Your completed lessons remain saved.</p><div class="button-row"><button type="button" class="button button-quiet" data-action="study-entry" data-entry="first-game-essentials">Prepare for my first game</button><button type="button" class="button button-quiet" data-action="study-entry" data-entry="consistency">Build consistency</button></div><h3>Find a skill for your situation</h3><div class="button-row">${situations.map((item) => `<a data-situation-link class="button button-quiet" href="${href("/library", { view: "skills", situation: item.id })}">${escapeHtml(item.label)}</a>`).join("")}</div></section>` : ""}
     <section class="page"><div class="path-heading"><div><p class="eyebrow">Seven units</p><h2>Follow the sequence—or open the part you need.</h2></div><span class="meta">Required pages drive progress; optional references never block it.</span></div>${study === "atlas" ? `<div class="button-row atlas-switch"><a class="button button-quiet" href="${atlasOpen ? "#/learn" : "#/learn?view=atlas"}">${atlasOpen ? "Show learning path" : "Explore the course Atlas"}</a></div>` : ""}${atlasOpen ? renderAtlas() : `<div class="path-list" aria-label="Pickleball learning path">${curriculumUnits.map(renderUnit).join("")}</div>`}</section>`, route);
@@ -409,7 +460,8 @@ function renderLesson(route, rawId) {
 
 function renderLockedLesson(route, lesson) {
   const prereq = prerequisitesFor(lesson).map(getLesson).find((item) => item && !isLessonComplete(item));
-  return renderShell(`<section class="empty-state"><p class="eyebrow">A useful step first</p><h1>${escapeHtml(lesson.title)} comes after a short foundation.</h1><p class="lede">${prereq ? `${escapeHtml(prereq.title)} gives this lesson its visual and rule context.` : "Choose an entry route or open the learning path to see what is ready."}</p><div class="button-row">${prereq ? `<a class="button button-primary" data-cta-priority="primary" href="${href(`/lesson/${prereq.id}`)}">Open: ${escapeHtml(prereq.title)}</a>` : '<a class="button button-primary" data-cta-priority="primary" href="#/placement">Choose my route</a>'}<a class="button button-quiet" data-cta-priority="quiet" href="#/learn">View path</a></div></section>`, route);
+  const refresher = !study && refresherGuides.find((topic) => topic.lesson.id === lesson.id);
+  return renderShell(`<section class="empty-state"><p class="eyebrow">A useful step first</p><h1>${escapeHtml(lesson.title)} comes after a short foundation.</h1><p class="lede">${prereq ? `${escapeHtml(prereq.title)} gives this lesson its visual and rule context.` : "Choose an entry route or open the learning path to see what is ready."}</p><div class="button-row">${prereq ? `<a class="button button-primary" data-cta-priority="primary" href="${href(`/lesson/${prereq.id}`)}">Open: ${escapeHtml(prereq.title)}</a>` : '<a class="button button-primary" data-cta-priority="primary" href="#/placement">Choose my route</a>'}${refresher ? refresherLink("Review the basics", { topic: refresher.guideId }) : ""}<a class="button button-quiet" data-cta-priority="quiet" href="#/learn">View path</a></div></section>`, route);
 }
 
 function renderLessonPage(lesson, page, index, route) {
@@ -448,7 +500,16 @@ function renderActivity(lesson, page, route) {
   const activity = page.activity;
   const stored = getLessonProgress(progress, lesson.id);
   const pageDone = (page.required !== false ? stored.requiredPages : stored.optionalPages).includes(page.id);
-  if (!activity) return pageDone ? '<p class="status is-complete">Page complete</p>' : `<div class="activity-panel"><p>Read this page, then mark it complete when you are ready.</p><div class="activity-actions"><button class="button button-primary" data-cta-priority="primary" type="button" data-action="page-complete" data-lesson="${lesson.id}" data-page="${page.id}">Mark page complete</button></div></div>`;
+  if (!activity) {
+    if (pageDone) return '<p class="status is-complete">Page complete</p>';
+    let tip = "Read this page, then mark it complete when you are ready.";
+    if (!study && page === requiredPages(lesson)[0]) {
+      tip = route.query.get("page") === page.id
+        ? "Read this page and mark it complete, then choose Next. Your progress is saved in this browser."
+        : "Read this page, then mark it complete to continue. Your progress is saved in this browser.";
+    }
+    return `<div class="activity-panel"><p>${tip}</p><div class="activity-actions"><button class="button button-primary" data-cta-priority="primary" type="button" data-action="page-complete" data-lesson="${lesson.id}" data-page="${page.id}">Mark page complete</button></div></div>`;
+  }
   const kind = activity.kind || "retrieval";
   if (kind === "court-lab") return `<div class="activity-panel"><p class="eyebrow">Spatial practice</p><h3>${escapeHtml(activity.prompt || "Open the interactive court")}</h3><p>${escapeHtml(activity.description || "Use the full court when zone, serve, or player position matters. A text alternative remains in each scenario.")}</p><div class="activity-actions"><a class="button ${pageDone ? "button-secondary" : "button-primary"}" data-cta-priority="${pageDone ? "secondary" : "primary"}" href="#/court-lab?from=lesson&lesson=${encodeURIComponent(lesson.id)}">Open Court Lab</a>${pageDone ? '<span class="status is-complete">Court page complete</span>' : ""}</div></div>`;
   if (kind === "practice" || kind === "drill") return `<div class="activity-panel"><p class="eyebrow">Optional physical practice</p><h3>${escapeHtml(activity.prompt || "Try a small, safe repetition")}</h3><p>${escapeHtml(activity.practicePrompt || activity.description || "Choose standing, seated, reduced-range, or reading-only practice. Logging it never blocks concept completion.")}</p><div class="activity-actions"><button class="button button-secondary" type="button" data-action="practice-log" data-lesson="${lesson.id}" data-mode="practice">Log practice</button><button class="button button-quiet" type="button" data-action="page-complete" data-lesson="${lesson.id}" data-page="${page.id}">Use reading-only route</button></div></div>`;
@@ -476,22 +537,38 @@ function renderPractice(route) {
     return `<a class="practice-row" href="${href(`/lesson/${lesson.id}`, { page: page.id })}"><span><strong>${escapeHtml(page.title || lesson.title)}</strong><p>${escapeHtml(page.activity?.practicePrompt || page.body || lesson.outcome)}</p></span><span class="status ${complete ? "is-complete" : "is-current"}">${complete ? "Review" : "Open"}</span></a>`;
   }).join("");
   const practiceTotal = practiceCount();
-  return renderShell(`<section class="practice-layout page"><div><p class="eyebrow">Practice</p><h1>Take one useful cue to the court.</h1><p class="lede">Practice logs are voluntary. Every activity has a standing, seated, reduced-range, or reading-only way to continue learning.</p><div class="practice-list">${rows}</div></div><aside class="practice-aside"><p class="eyebrow">Your log</p><h2>${practiceTotal} practice${practiceTotal === 1 ? "" : "s"} recorded</h2><p>Use this as a memory aid, not a score. Court access and physical movement never gate lesson completion.</p><a class="button button-quiet" href="#/progress">See progress</a></aside></section>`, route);
+  const practiceCue = study
+    ? "Practice logs are voluntary. Every activity has a standing, seated, reduced-range, or reading-only way to continue learning."
+    : "Pick one drill to try or read through. Log it if you want to remember what you practised.";
+  return renderShell(`<section class="practice-layout page"><div><p class="eyebrow">Practice</p><h1>Take one useful cue to the court.</h1><p class="lede">${practiceCue}</p><div class="practice-list">${rows}</div></div><aside class="practice-aside"><p class="eyebrow">Your log</p><h2>${practiceTotal} practice${practiceTotal === 1 ? "" : "s"} recorded</h2><p>Use this as a memory aid, not a score. Court access and physical movement never gate lesson completion.</p><a class="button button-quiet" href="#/progress">See progress</a></aside></section>`, route);
 }
 
 function renderCourt(route) {
   const visited = new Set(progress.courtVisited);
   const hasRequiredZones = hasCourtZones();
   const returnTarget = courtReturnTarget(route);
+  const fromLesson = returnTarget.href !== "#/learn";
   const modes = {
-    explore: ["Explore the zones", "Select the kitchen, a service court, and a baseline to build a court map."],
+    explore: ["Explore the zones", study ? "Select the kitchen, a service court, and a baseline to build a court map." : "Select a labelled zone to learn what it means."],
     serve: ["Place the serve", "Choose the diagonally opposite service court from the lower-left baseline."],
     kitchen: ["Judge the kitchen scenario", "Use ball contact and momentum to decide whether a fault occurs."],
     check: ["Confirm the court map", hasRequiredZones ? "Use one quick check to confirm the spatial cue before returning to the lesson." : "Visit the kitchen, a service court, and a baseline first; then the map check will open."],
   };
   const [title, intro] = modes[courtMode] || modes.explore;
   const gateLabel = !hasRequiredZones ? "Explore three zones to continue" : !progress.courtKnowledgePassed ? "Pass the court check to continue" : "Court map complete";
-  return renderShell(`<section class="court-page page"><div class="court-head"><div><p class="eyebrow">Court Lab · Interactive guide</p><h1>${title}</h1><p class="lede">${intro}</p></div><div class="court-progress" aria-label="${visited.size} of 3 court zones explored; court map check ${progress.courtKnowledgePassed ? "complete" : "pending"}"><strong>${visited.size}/3</strong><small>zones explored · ${progress.courtKnowledgePassed ? "check complete" : "check next"}</small></div></div><div class="court-tabs" role="group" aria-label="Court Lab activities">${[["explore", "Explore zones"], ["serve", "Serve placement"], ["kitchen", "Kitchen scenario"], ["check", "Court check"]].map(([mode, label]) => `<button type="button" aria-pressed="${courtMode === mode}" data-action="court-mode" data-mode="${mode}">${label}</button>`).join("")}</div><div class="court-layout"><div class="court-diagram-wrap">${renderCourtSvg()}<p class="court-caption">Every visual control has a labelled, keyboard-accessible court region. Use the coaching text beside it as a full text equivalent.</p></div><aside class="court-coach" aria-live="polite">${renderCourtCoach()}</aside></div><div class="court-actions"><a class="button button-quiet" href="#/learn">Back to learning path</a>${progress.courtExplored ? `<a class="button button-primary" href="${escapeHtml(returnTarget.href)}">${escapeHtml(returnTarget.label)}</a>` : `<button class="button button-primary" type="button" disabled>${gateLabel}</button>`}</div></section>`, route);
+  const lessonAction = progress.courtExplored
+    ? `<a class="button button-primary" href="${escapeHtml(returnTarget.href)}">${escapeHtml(returnTarget.label)}</a>`
+    : `<button class="button button-primary" type="button" disabled>${gateLabel}</button>`;
+  const coach = !study && courtMode === "explore" ? renderCourtTip(fromLesson) : "";
+  return renderShell(`<section class="court-page page"><div class="court-head"><div><p class="eyebrow">Court Lab · Interactive guide</p><h1>${title}</h1><p class="lede">${intro}</p></div><div class="court-progress" aria-label="${visited.size} of 3 court zones explored; court map check ${progress.courtKnowledgePassed ? "complete" : "pending"}"><strong>${visited.size}/3</strong><small>zones explored · ${progress.courtKnowledgePassed ? "check complete" : "check next"}</small></div></div><div class="court-tabs" role="group" aria-label="Court Lab activities">${[["explore", "Explore zones"], ["serve", "Serve placement"], ["kitchen", "Kitchen scenario"], ["check", "Court check"]].map(([mode, label]) => `<button type="button" aria-pressed="${courtMode === mode}" data-action="court-mode" data-mode="${mode}">${label}</button>`).join("")}</div><div class="court-layout"><div class="court-diagram-wrap">${renderCourtSvg()}<p class="court-caption">Every visual control has a labelled, keyboard-accessible court region. Use the coaching text beside it as a full text equivalent.</p></div><aside class="court-coach" aria-live="polite">${renderCourtCoach()}${coach}</aside></div><div class="court-actions"><a class="button button-quiet" href="#/learn">Back to learning path</a>${study || fromLesson ? lessonAction : ""}</div></section>`, route);
+}
+
+function renderCourtTip(fromLesson) {
+  if (!fromLesson) return "<p>For a quick review, choose <strong>Serve placement</strong> or <strong>Kitchen scenario</strong>.</p>";
+  if (progress.courtExplored) return "";
+  return hasCourtZones()
+    ? "<p>Choose <strong>Court check</strong> to confirm the map and return to your lesson.</p>"
+    : "<p>Visit the <strong>kitchen</strong>, a <strong>service court</strong>, and a <strong>baseline</strong>. Then choose <strong>Court check</strong>.</p>";
 }
 
 function hasCourtZones() {
@@ -532,12 +609,80 @@ function renderCourtCoach() {
     const copy = { kitchen: ["The non-volley zone", "You may stand here and play a bounced ball. The restriction applies to volleys and their follow-through momentum."], service: ["A service court", "The centreline divides left and right service courts. A serve travels diagonally into the opposite one, beyond the kitchen."], baseline: ["The baseline", "A serve begins behind this line. It also helps you describe whether a ball is in or out during a rally."] }[category];
     return `<p class="eyebrow">Court cue</p><h2>${copy[0]}</h2><p>${copy[1]}</p>${renderVisited()}`;
   }
-  return `<p class="eyebrow">Start here</p><h2>Select a court zone.</h2><p>Visit the kitchen, one service court, and either baseline. Then use the optional serve and kitchen scenarios to test the map.</p>${renderVisited()}`;
+  return `<p class="eyebrow">Start here</p><h2>Select a court zone.</h2>${study ? "<p>Visit the kitchen, one service court, and either baseline. Then use the optional serve and kitchen scenarios to test the map.</p>" : ""}${renderVisited()}`;
 }
 
 function renderVisited() { return `<div class="court-visited" aria-label="Required zones explored">${["kitchen", "service", "baseline"].map((category) => `<span class="${progress.courtVisited.includes(category) ? "is-done" : ""}">${progress.courtVisited.includes(category) ? "✓" : "○"} ${category}</span>`).join("")}</div>`; }
 
+function renderLibraryTabs(view) {
+  const views = [["skills", "Visual skills"], ["rules", "Rules & guides"]];
+  if (!study) views.push(["refresher", "Quick refresher"]);
+  return `<div class="library-tabs" role="group" aria-label="Library views">${views.map(([id, label]) => `<button type="button" aria-pressed="${view === id}" data-action="library-view" data-view="${id}">${escapeHtml(label)}</button>`).join("")}</div>`;
+}
+
+function isRefresherRoute(route) {
+  return !study && route.path === "/library" && route.query.get("view") === "refresher";
+}
+
+function getRefresherTopic(route) {
+  return refresherGuides.find(({ guideId }) => guideId === route.query.get("topic"));
+}
+
+function renderRefresher(route) {
+  const topic = getRefresherTopic(route);
+  let content;
+  if (topic) {
+    const { guide, lesson, page } = topic;
+    const lessonLabel = isLessonComplete(lesson) ? "Review full lesson" : isLessonAvailable(lesson) ? "Open full lesson" : "See lesson prerequisites";
+    const { prompt, options } = page.activity;
+    content = `<div class="refresher-answer">
+      <h1 tabindex="-1" data-refresher-heading>${escapeHtml(topic.title)}</h1>
+      <p class="lede">${escapeHtml(guide.summary)}</p>
+      <details class="refresher-check">
+        <summary>Try a quick check</summary>
+        <div class="refresher-question">
+          <h2 id="refresher-question">${escapeHtml(prompt)}</h2>
+          ${topic.showScenarioContext ? `<p>${escapeHtml(page.body)}</p>` : ""}
+          <div class="activity-actions" role="group" aria-labelledby="refresher-question">
+            ${options.map((option, index) => `<button class="button button-secondary" type="button" data-action="refresher-answer" data-index="${index}" aria-pressed="false">${escapeHtml(optionValue(option))}</button>`).join("")}
+          </div>
+          <p class="refresher-feedback" role="status" aria-atomic="true"></p>
+        </div>
+      </details>
+      <div class="button-row refresher-actions">
+        ${refresherLink("All refresher topics")}
+        <a class="button button-quiet" href="${href(`/lesson/${lesson.id}`)}">${lessonLabel}</a>
+      </div>
+      ${renderSources(guide.sourceIds)}
+    </div>`;
+  } else {
+    content = `<div class="refresher-answer">
+      <h1 tabindex="-1" data-refresher-heading>Quick refresher</h1>
+      <p class="lede">Choose a rule for a quick answer and an optional scenario.</p>
+      <ul class="refresher-topics">${refresherGuides.map(({ guideId, title }) => `<li><a class="button button-secondary" href="${escapeHtml(refresherHref(guideId))}">${escapeHtml(title)}</a></li>`).join("")}</ul>
+    </div>`;
+  }
+  return renderShell(`<section class="reading refresher-view">${renderLibraryTabs("refresher")}${content}</section>`, route);
+}
+
+function answerRefresher(target) {
+  const route = getRoute();
+  if (!isRefresherRoute(route)) return;
+  const topic = getRefresherTopic(route);
+  const index = Number(target.dataset.index);
+  const activity = topic?.page.activity;
+  if (!activity?.options[index]) return;
+  const question = target.closest(".refresher-question");
+  if (!question) return;
+  for (const option of question.querySelectorAll('[data-action="refresher-answer"]')) {
+    option.setAttribute("aria-pressed", String(option === target));
+  }
+  const result = index === correctOptionIndex(activity) ? "Correct." : "Try again.";
+  question.querySelector(".refresher-feedback").textContent = `${result} ${topic.explanation}`;
+}
+
 function renderLibrary(route) {
+  if (isRefresherRoute(route)) return renderRefresher(route);
   const view = route.path === "/resources" || route.query.get("view") === "rules" ? "rules" : "skills";
   const situation = study === "discovery" && view === "skills" ? situations.find((item) => item.id === route.query.get("situation")) : null;
   const query = libraryQuery.toLowerCase().trim();
@@ -548,15 +693,19 @@ function renderLibrary(route) {
   const filtered = items.filter((item) => (!situation || situation.lessons.includes(item.id)) && (!query || `${item.title} ${item.description} ${item.summary || ""} ${item.tag}`.toLowerCase().includes(query)) && (libraryFilter === "All topics" || item.tag === libraryFilter));
   const filters = ["All topics", ...new Set(items.map((item) => item.tag).filter(Boolean))].slice(0, 8);
   const situationLinks = study === "discovery" && view === "skills" ? `<nav class="situation-nav" aria-label="Find skills by situation"><span>Explore a situation:</span> <a data-situation-link href="#/library?view=skills" ${!situation ? 'aria-current="page"' : ""}>All situations</a>${situations.map((item) => `<a data-situation-link href="${href("/library", { view: "skills", situation: item.id })}" ${situation?.id === item.id ? 'aria-current="page"' : ""}>${escapeHtml(item.label)}</a>`).join("")}</nav>` : "";
-  return renderShell(`<section class="page"><div class="library-head"><div><p class="eyebrow">Library</p><h1>Find a rule or skill when you need it.</h1><p class="lede">Find a quick answer or explore a full lesson. Lesson prerequisites still apply.</p></div><label><span class="eyebrow">Search</span><input class="library-search" type="search" value="${escapeHtml(libraryQuery)}" placeholder="Kitchen, score, drop, or safety" data-input="library-query" /></label></div><div class="library-tabs" role="group" aria-label="Library views"><button type="button" aria-pressed="${view === "skills"}" data-action="library-view" data-view="skills">Visual skills</button><button type="button" aria-pressed="${view === "rules"}" data-action="library-view" data-view="rules">Rules & guides</button></div>${situationLinks}<div class="library-layout"><aside class="library-filter"><span>Browse by</span>${filters.map((filter) => `<button type="button" aria-pressed="${libraryFilter === filter}" data-action="library-filter" data-filter="${escapeHtml(filter)}">${escapeHtml(filter)}</button>`).join("")}</aside><div><div class="library-controls"><p role="status" aria-live="polite">${filtered.length} ${filtered.length === 1 ? "result" : "results"}</p><button type="button" class="button button-quiet" data-action="library-clear">Clear search and filters</button></div><div class="library-list">${filtered.length ? filtered.map((item) => view === "rules" ? `<article class="library-guide"><h2>${escapeHtml(item.title)}</h2><p>${escapeHtml(item.summary || item.description)}</p>${renderSources(item.sourceIds || [])}<a class="button button-quiet" href="${escapeHtml(item.href)}">Open full lesson: ${escapeHtml(item.title)} (prerequisites may apply)</a></article>` : `<a class="library-row" href="${escapeHtml(item.href)}">${item.image ? `<span class="library-thumbnail"><img src="${escapeHtml(item.image.src)}" alt="${escapeHtml(item.image.alt)}" /></span>` : '<span class="library-thumbnail" aria-hidden="true"></span>'}<span><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.description)}</p>${study === "discovery" ? `<small>${escapeHtml(levelLabel(getUnit(getLesson(item.id))?.level))}</small>` : ""}</span><span class="library-tag">${escapeHtml(item.tag)}</span></a>`).join("") : '<p class="muted">No matching items yet. Try a broader word or clear the search and filters.</p>'}</div></div></div></section>`, route);
+  return renderShell(`<section class="page"><div class="library-head"><div><p class="eyebrow">Library</p><h1>Find a rule or skill when you need it.</h1><p class="lede">Find a quick answer or explore a full lesson. Lesson prerequisites still apply.</p></div><label><span class="eyebrow">Search</span><input class="library-search" type="search" value="${escapeHtml(libraryQuery)}" placeholder="Kitchen, score, drop, or safety" data-input="library-query" /></label></div>${renderLibraryTabs(view)}${situationLinks}<div class="library-layout"><aside class="library-filter"><span>Browse by</span>${filters.map((filter) => `<button type="button" aria-pressed="${libraryFilter === filter}" data-action="library-filter" data-filter="${escapeHtml(filter)}">${escapeHtml(filter)}</button>`).join("")}</aside><div><div class="library-controls"><p role="status" aria-live="polite">${filtered.length} ${filtered.length === 1 ? "result" : "results"}</p><button type="button" class="button button-quiet" data-action="library-clear">Clear search and filters</button></div><div class="library-list">${filtered.length ? filtered.map((item) => view === "rules" ? `<article class="library-guide"><h2>${escapeHtml(item.title)}</h2><p>${escapeHtml(item.summary || item.description)}</p>${renderSources(item.sourceIds || [])}<a class="button button-quiet" href="${escapeHtml(item.href)}">Open full lesson: ${escapeHtml(item.title)} (prerequisites may apply)</a></article>` : `<a class="library-row" href="${escapeHtml(item.href)}">${item.image ? `<span class="library-thumbnail"><img src="${escapeHtml(item.image.src)}" alt="${escapeHtml(item.image.alt)}" /></span>` : '<span class="library-thumbnail" aria-hidden="true"></span>'}<span><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.description)}</p>${study === "discovery" ? `<small>${escapeHtml(levelLabel(getUnit(getLesson(item.id))?.level))}</small>` : ""}</span><span class="library-tag">${escapeHtml(item.tag)}</span></a>`).join("") : '<p class="muted">No matching items yet. Try a broader word or clear the search and filters.</p>'}</div></div></div></section>`, route);
 }
 
 function renderProgress(route) {
   const complete = completedLessonCount();
-  const coreTotal = lessons.filter((lesson) => !isOptional(lesson)).length;
   const next = getNextLesson();
   const earned = progress.earnedStickers.map((id) => Object.values(stickers).find((sticker) => sticker.id === id)).filter(Boolean);
-  return renderShell(`<section class="page"><div class="progress-head"><div><p class="eyebrow">Progress</p><h1>Small wins, useful next steps.</h1><p class="lede">Progress is saved in this browser on this device and does not sync. Resume opens your next incomplete required page. Clearing browser data can erase progress. It is not a rating.</p></div>${next ? `<a class="button button-primary" href="${href(`/lesson/${next.id}`)}">Resume: ${escapeHtml(next.title)}</a>` : '<a class="button button-primary" href="#/library?view=skills">Choose a review</a>'}</div><div class="progress-summary"><div><strong>${complete}</strong><span>concept steps understood</span></div><div><strong>${practiceCount()}</strong><span>practice logs</span></div><div><strong>${earned.length}</strong><span>keepsakes earned</span></div></div><div class="progress-layout"><section><h2>Continue building</h2><div class="progress-list">${lessons.filter((lesson) => isLessonAvailable(lesson) && !isLessonComplete(lesson)).slice(0, 4).map((lesson) => `<a class="progress-row" href="${href(`/lesson/${lesson.id}`)}"><span><strong>${escapeHtml(lesson.title)}</strong><p>${escapeHtml(lesson.outcome || lesson.summary)}</p></span><span class="status is-current">Open</span></a>`).join("") || '<p class="muted">Your core path is complete. Optional deep dives are ready in Learn and Library.</p>'}</div><details class="reset-details" ${resetArmed ? "open" : ""}><summary>Reset this device’s v2 learning progress</summary><p>This starts the refreshed curriculum again on this browser. It does not change the older v1 key.</p>${resetArmed ? '<div class="button-row"><button class="button button-danger" type="button" data-action="reset-confirm">Reset fresh path</button><button class="button button-quiet" type="button" data-action="reset-cancel">Cancel</button></div>' : '<button class="button button-quiet" type="button" data-action="reset-arm">Reset progress</button>'}</details></section><aside class="progress-aside"><p class="eyebrow">Learning keepsakes</p><h2>${earned.length ? "A few moments worth remembering." : "Your first keepsake will appear here."}</h2>${earned.slice(-3).map((sticker) => `<div class="sticker-line"><img src="${escapeHtml(sticker.asset)}" alt="${escapeHtml(sticker.title)} sticker" /><span><strong>${escapeHtml(sticker.title)}</strong><br /><span class="muted">Earned after a concept step</span></span></div>`).join("") || '<p class="muted">Complete one concept check or explore the Court Lab to collect a small reminder of what you learned.</p>'}</aside></div></section>`, route);
+  const resumeCue = study ? "Resume opens your next incomplete required page." : next ? "Resume starts at your next incomplete required page." : "";
+  const resumeAction = next
+    ? `<a class="button button-primary" href="${href(`/lesson/${next.id}`)}">Resume: ${escapeHtml(next.title)}</a>`
+    : study ? '<a class="button button-primary" href="#/library?view=skills">Choose a review</a>' : refresherLink("Quick refresher", { primary: true });
+  const actions = study ? resumeAction : `<div class="progress-actions">${resumeAction}<div class="button-row"><a class="button button-quiet" href="#/learn?review=completed">Review completed lessons</a>${next ? refresherLink() : ""}</div></div>`;
+  return renderShell(`<section class="page"><div class="progress-head"><div><p class="eyebrow">Progress</p><h1>Small wins, useful next steps.</h1><p class="lede">Progress is saved in this browser on this device and does not sync. ${resumeCue ? `${resumeCue} ` : ""}Clearing browser data can erase progress. It is not a rating.</p></div>${actions}</div><div class="progress-summary"><div><strong>${complete}</strong><span>concept steps understood</span></div><div><strong>${practiceCount()}</strong><span>practice logs</span></div><div><strong>${earned.length}</strong><span>keepsakes earned</span></div></div><div class="progress-layout"><section><h2>Continue building</h2><div class="progress-list">${lessons.filter((lesson) => isLessonAvailable(lesson) && !isLessonComplete(lesson)).slice(0, 4).map((lesson) => `<a class="progress-row" href="${href(`/lesson/${lesson.id}`)}"><span><strong>${escapeHtml(lesson.title)}</strong><p>${escapeHtml(lesson.outcome || lesson.summary)}</p></span><span class="status is-current">Open</span></a>`).join("") || '<p class="muted">Your core path is complete. Optional deep dives are ready in Learn and Library.</p>'}</div><details class="reset-details" ${resetArmed ? "open" : ""}><summary>Reset this device’s v2 learning progress</summary><p>This starts the refreshed curriculum again on this browser. It does not change the older v1 key.</p>${resetArmed ? '<div class="button-row"><button class="button button-danger" type="button" data-action="reset-confirm">Reset fresh path</button><button class="button button-quiet" type="button" data-action="reset-cancel">Cancel</button></div>' : '<button class="button button-quiet" type="button" data-action="reset-arm">Reset progress</button>'}</details></section><aside class="progress-aside"><p class="eyebrow">Learning keepsakes</p><h2>${earned.length ? "A few moments worth remembering." : "Your first keepsake will appear here."}</h2>${earned.slice(-3).map((sticker) => `<div class="sticker-line"><img src="${escapeHtml(sticker.asset)}" alt="${escapeHtml(sticker.title)} sticker" /><span><strong>${escapeHtml(sticker.title)}</strong><br /><span class="muted">Earned after a concept step</span></span></div>`).join("") || '<p class="muted">Complete one concept check or explore the Court Lab to collect a small reminder of what you learned.</p>'}</aside></div></section>`, route);
 }
 
 function renderNotFound(route) {
@@ -586,7 +735,9 @@ function render({ focusMain = false, lessonFocus = null } = {}) {
   if (focusMain && !activeSticker && !lessonFocus) requestAnimationFrame(() => {
     const returnId = route.path === "/learn" ? route.query.get("return") : null;
     const row = returnId && [...document.querySelectorAll("[data-lesson-id]")].find((element) => element.dataset.lessonId === returnId);
+    const refresherHeading = isRefresherRoute(route) && document.querySelector("[data-refresher-heading]");
     if (row) { const unit = row.closest("details"); if (unit) unit.open = true; row.focus(); }
+    else if (refresherHeading) refresherHeading.focus();
     else document.querySelector("#main-content")?.focus({ preventScroll: true });
   });
   if (activeSticker) requestAnimationFrame(() => document.querySelector('[data-action="sticker-dismiss"]')?.focus({ preventScroll: true }));
@@ -594,6 +745,7 @@ function render({ focusMain = false, lessonFocus = null } = {}) {
 
 function titleForRoute(route) {
   if (route.segments[0] === "lesson") return `${getLesson(route.segments[1])?.title || "Lesson"} — Learn Pickleball`;
+  if (isRefresherRoute(route)) return `${getRefresherTopic(route)?.title || "Quick refresher"} — Learn Pickleball`;
   const titles = { "/": "Learn Pickleball — Get court-ready", "/learn": "Learn — Learn Pickleball", "/practice": "Practice — Learn Pickleball", "/court-lab": "Court Lab — Learn Pickleball", "/court": "Court Lab — Learn Pickleball", "/library": "Library — Learn Pickleball", "/skills": "Visual skills — Learn Pickleball", "/resources": "Rules & guides — Learn Pickleball", "/progress": "Progress — Learn Pickleball", "/achievements": "Progress — Learn Pickleball" };
   return titles[route.path] || "Learn Pickleball";
 }
@@ -656,6 +808,7 @@ function handleAction(event) {
   if (action === "set-entry") { progress.entryRouteId = target.dataset.entry; progress.activePlaylistId = target.dataset.entry === "first-game-essentials" ? target.dataset.entry : null; progress.placementAnswers = {}; progress.diagnosticAnswers = {}; persist(); render({ focusMain: true }); return; }
   if (action === "diagnostic-answer") { progress.diagnosticAnswers[target.dataset.question] = Number(target.dataset.value); persist(); render({ focusMain: true }); return; }
   if (action === "placement-restart") { progress.entryRouteId = null; progress.activePlaylistId = null; progress.placementAnswers = {}; progress.diagnosticAnswers = {}; persist(); render({ focusMain: true }); return; }
+  if (action === "refresher-answer") { answerRefresher(target); return; }
   if (action === "page-complete") { const lessonPage = getActionLessonPage(target); if (lessonPage) { const { lesson, page } = lessonPage; recordLessonPage(lesson, page, page.required !== false); showToast(page.required !== false ? "Page recorded. Continue when ready." : "Optional reference saved."); render({ lessonFocus: lessonFocusAfterAction(lesson, page, false) }); } return; }
   if (action === "practice-log") { recordPractice(progress, target.dataset.lesson, target.dataset.mode || "practice"); persist(); showToast("Practice logged. It never changes your concept completion."); render(); return; }
   if (action === "page-answer") { const lessonPage = getActionLessonPage(target); if (!lessonPage) return; const { lesson, page } = lessonPage; const activity = page.activity || {}; const index = Number(target.dataset.index); const correct = index === correctOptionIndex(activity); pageSelections[activityKey(lesson, page)] = { index }; recordAttempt(progress, lesson.id, activity.id || page.id, correct); if (correct) { recordLessonPage(lesson, page, page.required !== false); showToast("Correct. Page recorded."); } else { persist(); } render({ lessonFocus: lessonFocusAfterAction(lesson, page, true) }); return; }
@@ -682,7 +835,8 @@ document.addEventListener("input", (event) => {
     libraryQuery = event.target.value;
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
-      if (!["/library", "/skills", "/resources"].includes(getRoute().path)) return;
+      const route = getRoute();
+      if (!["/library", "/skills", "/resources"].includes(route.path) || isRefresherRoute(route)) return;
       const inputHadFocus = document.activeElement?.matches('[data-input="library-query"]');
       render();
       if (inputHadFocus) requestAnimationFrame(() => { const input = document.querySelector('[data-input="library-query"]'); input?.focus(); input?.setSelectionRange(libraryQuery.length, libraryQuery.length); });
@@ -695,6 +849,14 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Tab" && activeSticker) { event.preventDefault(); document.querySelector('[data-action="sticker-dismiss"]')?.focus(); }
   if (event.key === "Escape" && activeSticker) { activeSticker = null; const lessonFocus = pendingLessonFocus; pendingLessonFocus = null; render({ focusMain: true, lessonFocus }); }
 });
-window.addEventListener("hashchange", () => { pageSelections = {}; render({ focusMain: true }); });
+window.addEventListener("hashchange", () => {
+  pageSelections = {};
+  if (!study && navKey(getRoute()) === "court") {
+    courtMode = "explore";
+    activeCourtZone = null;
+    courtFeedback = null;
+  }
+  render({ focusMain: true });
+});
 
 render();

@@ -470,6 +470,13 @@ export const libraryEntries = [
   { id: "formats-guide", title: "Singles, mini-singles, and scoring formats", summary: "Traditional doubles, singles, mini-singles, and rally scoring can use different scoring or position conventions. Confirm the format and its current rules before play.", description: "Compare format-specific score calls and positioning anchors before organised play.", tag: "Official rule", lessonId: "formats-inclusive", sourceIds: ["R1", "R2", "R11"] },
 ];
 
+export const refresherTopics = [
+  { guideId: "serve-guide", title: "Serving", pageId: "legal-serve-check", explanation: "Aim for the opposite service court diagonally across the net, beyond the kitchen." },
+  { guideId: "two-bounce-guide", title: "Two-bounce rule", pageId: "opening-recall", explanation: "The first bounce is on the serve. The second is on the return, before the serving team hits it." },
+  { guideId: "kitchen-guide", title: "Kitchen rule", pageId: "kitchen-decisions", explanation: "Volley momentum counts as part of the volley. Touching the kitchen line because of that momentum is a fault." },
+  { guideId: "score-guide", title: "Doubles scoring", pageId: "score-call", showScenarioContext: true, explanation: "Call the serving team’s 4 first, the receiving team’s 2 next, then 2 for the second server." },
+];
+
 export const legacyLessonAliases = {
   "court-kitchen": { defaultLessonId: "court-orientation", unfinished: ["court-orientation", "kitchen-rule"] },
   "gear-grip": { defaultLessonId: "equipment-safety", unfinished: ["equipment-safety", "ready-position"] },

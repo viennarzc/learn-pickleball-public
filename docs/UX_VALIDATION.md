@@ -24,6 +24,17 @@ Give each participant the task in their own words without naming the screen or b
 
 For duration estimates, separately measure complete lessons with consenting learners and record optional practice and interruptions. Do not present the current ranges as validated until enough observations support a content-owner review.
 
+## Onboarding and refresher tasks
+
+Start each participant on Home. Read the prompts aloud and record whether they finish without help, any wrong turns, and where they hesitate.
+
+| Participant | Prompt | Independent success |
+| --- | --- | --- |
+| First-time player with a fresh browser profile | “You’ve never played pickleball. Find where you would begin learning.” | Chooses a beginner goal and opens Court orientation. |
+| Returning player with partial lesson progress | “You’re about to play again and want to double-check how to call a doubles score. Answer one example, then pick up your lesson.” | Finds doubles scoring, answers the optional scenario, and resumes at the next incomplete required page. |
+
+During a screen-reader session, verify that the disclosure announces its state, each answer is reachable, and answer feedback is spoken while focus stays on the choice.
+
 ## P2 comparison
 
 Test practical-goal discovery and the optional Atlas as prototypes before committing to production. Compare each prototype with the existing Learn list. Keep the same curriculum, progress state, tasks, and device conditions, and vary the presentation order between participants to reduce learning effects. The existing Court Atlas image is an older, five-unit static mock; the seven-unit interactive study variant below is the test condition. No real-participant or screen-reader results are claimed.

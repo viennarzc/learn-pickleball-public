@@ -18,7 +18,7 @@ const context = {
   requestAnimationFrame() {},
 };
 vm.createContext(context);
-vm.runInContext(source + `\nglobalThis.test = { renderLibrary, renderSources, renderUnit, rememberUnit, handleAction, getRoute, lessonFocusAfterAction, setProgress: (value) => progress = value, setFilter: (v) => libraryFilter = v, setQuery: (v) => libraryQuery = v, getFilter: () => libraryFilter, getQuery: () => libraryQuery };`, context);
+vm.runInContext(source + `\nglobalThis.test = { render, renderLibrary, renderSources, renderUnit, rememberUnit, handleAction, getRoute, lessonFocusAfterAction, setProgress: (value) => progress = value, setFilter: (v) => libraryFilter = v, setQuery: (v) => libraryQuery = v, getFilter: () => libraryFilter, getQuery: () => libraryQuery };`, context);
 const t = context.test;
 const rules = { path: "/library", query: new URLSearchParams("view=rules") };
 assert.match(t.renderLibrary(rules), /volley momentum/);
@@ -101,6 +101,94 @@ const savedJourney = progressModule.loadProgress(new Set(curriculum.curriculumUn
 assert.equal(savedJourney.lessonProgress[orientation.id].conceptUnderstood, true, "completion survives reload");
 assert.equal(savedJourney.lessonProgress[orientation.id].attempts["court-recall-check"].count, 2);
 
+const refreshPath = "#/library?view=refresher";
+const navigate = (hash) => {
+  context.window.location.hash = hash;
+  t.render();
+  return app.innerHTML;
+};
+const newcomer = progressModule.createFreshProgress();
+t.setProgress(newcomer);
+assert.match(navigate("#/"), /href="#\/placement">Start learning/);
+assert.match(app.innerHTML, /href="#\/library\?view=refresher">Quick refresher/);
+assert.match(navigate("#/learn"), /href="#\/placement">Choose a learning goal/);
+assert.match(navigate("#/placement"), /I’m new to pickleball/);
+assert.match(app.innerHTML, /I’m preparing for my first game/);
+for (const [goal, result] of [["never-played", "Start: Court orientation"], ["first-game-essentials", "See First Game Essentials"]]) {
+  act({ action: "set-entry", entry: goal });
+  assert.ok(app.innerHTML.includes(result));
+  act({ action: "placement-restart" });
+}
+
+const directStart = progressModule.createFreshProgress();
+progressModule.recordPage(directStart, "court-orientation", "why-court");
+t.setProgress(directStart);
+assert.match(navigate("#/"), /Resume lesson/);
+assert.match(app.innerHTML, /href="#\/placement">Choose a learning goal/);
+assert.match(navigate("#/learn"), /Continue: Court orientation/);
+assert.match(app.innerHTML, /href="#\/placement">Choose a learning goal/);
+assert.match(navigate("#/placement"), /I’m preparing for my first game/);
+act({ action: "set-entry", entry: "first-game-essentials" });
+assert.equal(directStart.entryRouteId, "first-game-essentials");
+assert.equal(directStart.activePlaylistId, "first-game-essentials");
+assert.deepEqual([...directStart.lessonProgress["court-orientation"].requiredPages], ["why-court"]);
+navigate("#/lesson/court-orientation");
+assert.match(app.innerHTML, /data-lesson-heading>Name the lines/);
+
+const topicList = navigate(refreshPath);
+assert.equal(navigate(`${refreshPath}&topic=unknown`), topicList);
+for (const [guideId, article] of [
+  ["serve-guide", "serve-basics"], ["two-bounce-guide", "two-bounce-rule"],
+  ["kitchen-guide", "kitchen-rules"], ["score-guide", "doubles-scoring"],
+]) {
+  const topic = curriculum.refresherTopics.find((item) => item.guideId === guideId);
+  const guide = curriculum.libraryEntries.find((entry) => entry.id === guideId);
+  const page = curriculum.getLesson(guide.lessonId).pages.find((item) => item.id === topic.pageId);
+  const topicUrl = `${refreshPath}&topic=${guideId}`;
+  const topicHref = topicUrl.replace("&", "&amp;");
+  assert.ok(topicList.includes(`href="${topicHref}"`));
+  const detail = navigate(topicUrl);
+  assert.ok(detail.includes(topic.title) && detail.includes(page.activity.prompt));
+  assert.ok(detail.includes(curriculum.sourceRegister.find((source) => source.id === guide.sourceIds[0]).url));
+  assert.match(detail, /<details class="refresher-check">/);
+  assert.match(detail, /See lesson prerequisites/);
+  assert.ok(navigate(`#/lesson/${guide.lessonId}`).includes(`href="${topicHref}">Review the basics`));
+  const publicGuide = await readFile(new URL(`../learn-pickleball/${article}/index.html`, import.meta.url), "utf8");
+  assert.ok(publicGuide.includes(`href="/${topicHref}">Try the quick check`));
+}
+
+const returning = progressModule.createFreshProgress();
+returning.entryRouteId = "never-played";
+returning.earnedStickers.push("court-explorer");
+progressModule.recordPage(returning, orientation.id, firstPage.id);
+progressModule.recordAttempt(returning, orientation.id, "court-recall-check", false);
+t.setProgress(returning);
+navigate(`${refreshPath}&topic=kitchen-guide`);
+const storedBeforeReview = store.get(progressModule.STORE_KEY);
+const feedback = { textContent: "" };
+const choices = ["0", "1", "2"].map((index) => ({
+  dataset: { action: "refresher-answer", index },
+  setAttribute(name, value) { this[name] = value; },
+  closest: () => question,
+}));
+const question = { querySelectorAll: () => choices, querySelector: () => feedback };
+const answer = (option) => t.handleAction({ target: { closest: () => option } });
+answer(choices[0]);
+assert.match(feedback.textContent, /^Try again\. Volley momentum/);
+answer(choices[1]);
+assert.match(feedback.textContent, /^Correct\. Volley momentum/);
+assert.deepEqual(choices.map((option) => option["aria-pressed"]), ["false", "true", "false"]);
+assert.equal(store.get(progressModule.STORE_KEY), storedBeforeReview, "Refresher answers must leave local progress untouched");
+assert.equal(JSON.stringify(returning), storedBeforeReview, "Refresher answers must also leave in-memory progress untouched");
+assert.match(navigate("#/"), /href="#\/lesson\/court-orientation">Resume lesson/);
+assert.match(navigate("#/lesson/court-orientation"), /data-lesson-heading>Name the lines/);
+progressModule.getLessonProgress(returning, orientation.id).conceptUnderstood = true;
+assert.match(navigate(`${refreshPath}&topic=kitchen-guide`), /Open full lesson/);
+for (const lesson of curriculum.getAllLessons()) progressModule.getLessonProgress(returning, lesson.id).conceptUnderstood = true;
+assert.match(navigate(`${refreshPath}&topic=kitchen-guide`), /Review full lesson/);
+assert.match(navigate("#/"), /class="button button-primary" data-cta-priority="primary" href="#\/library\?view=refresher">Quick refresher/);
+assert.match(app.innerHTML, /Review completed lessons/);
+
 context.window.sessionStorage.setItem = () => { throw new Error("unavailable"); };
 t.rememberUnit(unit.id, false);
 assert.doesNotMatch(t.renderUnit(unit), /data-unit-id="[^"]+" open/);
@@ -108,4 +196,4 @@ context.window.localStorage.setItem = () => { throw new Error("unavailable"); };
 assert.equal(progressModule.saveProgress(progressModule.createFreshProgress()), false);
 context.window.localStorage.getItem = () => "invalid json";
 assert.equal(progressModule.loadProgress().version, 2);
-console.log("P1 UX checks passed (summaries, filters, evidence and storage fallback).");
+console.log("P1 UX checks passed (summaries, filters, onboarding, refreshers and storage fallback).");
