@@ -98,7 +98,7 @@ async function connect(endpoint) {
 }
 
 // A page in its own browser context, so storage starts empty for every page.
-async function openPage(cdp, { width = 1280, height = 800, mobile = false } = {}) {
+async function openPage(cdp, { width = 1280, height = 800, mobile = false, reducedMotion = false } = {}) {
   const { browserContextId } = await cdp.send("Target.createBrowserContext");
   const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank", browserContextId });
   const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
@@ -111,6 +111,7 @@ async function openPage(cdp, { width = 1280, height = 800, mobile = false } = {}
   });
   await Promise.all([send("Page.enable"), send("Runtime.enable"), send("Log.enable")]);
   await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: mobile ? 3 : 1, mobile });
+  if (reducedMotion) await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   if (mobile) await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
 
   async function evaluate(expression) {

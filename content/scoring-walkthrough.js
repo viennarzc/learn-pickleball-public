@@ -112,7 +112,7 @@ export function renderScoringWalkthrough() {
   </section>`;
 }
 
-function renderDiagram(diagram, slide, highlightServer) {
+function renderDiagram(diagram, slide, highlightServer, showServe) {
   const describePlayer = ({ name, team, side }) => `${name} on ${teamNames[team]}’s ${side}`;
   const positions = slide.court.map(describePlayer).join(", ");
   diagram.setAttribute("aria-label", highlightServer ? `${positions}. ${slide.server} serves.` : positions);
@@ -124,6 +124,7 @@ function renderDiagram(diagram, slide, highlightServer) {
           <span>${name}</span>${highlightServer && serving ? "<small>Serves</small>" : ""}
         </div>`).join("")}
     </div>
+    ${showServe ? `<span class="scoring-serve-ball" data-serving-team="${slide.serving}" data-serving-side="${slide.side}" aria-hidden="true"></span>` : ""}
     <span class="scoring-court-team is-top" aria-hidden="true">Violet</span>
     <span class="scoring-court-team is-bottom" aria-hidden="true">Blue</span>`;
 }
@@ -153,6 +154,7 @@ export function mountScoringWalkthrough(root) {
   let step = -1;
   let answer = null;
   let timer;
+  let diagramKey;
 
   function stopAutoplay() {
     clearTimeout(timer);
@@ -174,12 +176,16 @@ export function mountScoringWalkthrough(root) {
     track.style.setProperty("--scoring-progress", `${Math.max(0, step) / finalStep * 100}%`);
     call.hidden = !started;
     const callLabels = [`${teamNames[slide.serving]} · serving`, `${teamNames[slide.receiving]} · receiving`, "Server #"];
-    call.innerHTML = slide.call.map((score, index) => `<div><span>${callLabels[index]}</span><strong>${score}</strong></div>`).join("");
+    call.innerHTML = slide.call.map((score, index) => `<div${index < 2 ? ` data-team="${index === 0 ? slide.serving : slide.receiving}"` : ""}><span>${callLabels[index]}</span><strong>${score}</strong></div>`).join("");
     call.setAttribute("aria-label", `Score call ${slide.call.join("–")}`);
     heading.textContent = predicting ? "Your turn" : started ? slide.title : "Traditional side-out scoring";
     explanation.hidden = predicting;
     explanation.textContent = started ? slide.explanation : example.intro;
-    renderDiagram(diagram, slide, started);
+    const nextDiagramKey = `${format}:${step}:${predicting}:${started}`;
+    if (diagramKey !== nextDiagramKey) {
+      renderDiagram(diagram, slide, started, started && !predicting);
+      diagramKey = nextDiagramKey;
+    }
 
     choices.hidden = !predicting;
     if (predicting) {

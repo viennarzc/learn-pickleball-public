@@ -122,6 +122,8 @@ it("opens the ungated doubles walkthrough from Library and reveals the next serv
     await page.waitFor('document.querySelector("main")?.dataset.view === "library"');
     await page.click("[data-scoring-link]");
     await page.waitFor('document.querySelector("main")?.dataset.view === "scoring"');
+    await page.waitFor('!!document.querySelector(".scoring-court")');
+    await page.evaluate('document.documentElement.style.scrollBehavior = "auto"');
 
     for (const [call, server, side] of [
       [[0, 0, 2], "Mira", "right"],
@@ -177,3 +179,59 @@ it("opens from Keep Score on mobile and stops singles autoplay at the prediction
     await page.close();
   }
 });
+
+for (const viewport of [
+  { width: 390, height: 844, mobile: true },
+  { width: 768, height: 1024 },
+  { width: 1280, height: 800 },
+  { width: 390, height: 844, mobile: true, reducedMotion: true },
+]) {
+  it(`shows each serve in its opposite service court at ${viewport.width}px${viewport.reducedMotion ? " with reduced motion" : ""}`, async () => {
+    const page = await browser.newPage(viewport);
+    try {
+      await page.goto(`${server.url}/#/scoring`);
+      await page.waitFor('document.querySelector("main")?.dataset.view === "scoring"');
+      await page.evaluate('document.documentElement.style.scrollBehavior = "auto"');
+      assert.equal(await page.evaluate('!!document.querySelector(".scoring-serve-ball")'), false);
+      for (const format of ["doubles", "singles"]) {
+        if (format === "singles") await page.click('[data-scoring-format="singles"]');
+        for (let step = 0; step < 5; step++) {
+          await page.click(scoringControl("next"));
+          const actual = await page.evaluate(`(() => {
+            const ball = document.querySelector('.scoring-serve-ball');
+            const player = document.querySelector('.scoring-player.is-serving');
+            const court = document.querySelector('.scoring-court').getBoundingClientRect();
+            const animation = ball.getAnimations()[0];
+            if (animation) { animation.pause(); animation.currentTime = 0; }
+            const start = ball.getBoundingClientRect();
+            const startX = (start.left + start.width / 2 - court.left) / court.width;
+            if (animation) animation.currentTime = 1200;
+            const b = ball.getBoundingClientRect();
+            const x = (b.left + b.width / 2 - court.left) / court.width;
+            const y = (b.top + b.height / 2 - court.top) / court.height;
+            return { team: ball.dataset.servingTeam, side: ball.dataset.servingSide,
+              playerTeam: player.dataset.team, playerSide: player.dataset.side,
+              startX, x, y, animated: !!animation, width: document.documentElement.scrollWidth };
+          })()`);
+          assert.equal(actual.team, actual.playerTeam);
+          assert.equal(actual.side, actual.playerSide);
+          const leftColumn = (actual.team === "blue") === (actual.side === "left");
+          if (actual.animated) assert.ok(leftColumn ? actual.startX > 0 && actual.startX < .5 : actual.startX > .5 && actual.startX < 1);
+          assert.ok(leftColumn ? actual.x > .5 && actual.x < 1 : actual.x > 0 && actual.x < .5);
+          assert.ok(actual.team === "blue" ? actual.y > 0 && actual.y < .34 : actual.y > .66 && actual.y < 1);
+          assert.equal(actual.animated, !viewport.reducedMotion);
+          assert.equal(actual.width, viewport.width);
+        }
+        await page.click(scoringControl("next"));
+        assert.equal(await page.evaluate('!!document.querySelector(".scoring-serve-ball")'), false);
+        await page.click('[data-scoring-answer="1"]');
+        assert.equal(await page.evaluate('!!document.querySelector(".scoring-serve-ball")'), true);
+        await page.click(scoringControl("back"));
+        assert.equal(await page.evaluate('!!document.querySelector(".scoring-serve-ball")'), true);
+      }
+      assert.deepEqual(page.errors, []);
+    } finally {
+      await page.close();
+    }
+  });
+}
