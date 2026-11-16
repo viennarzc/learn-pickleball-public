@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "npm run check && node scripts/build-contact.mjs",
     "test": "node --test tests/progress.test.js tests/normalize-progress.test.js tests/progress-api.test.js tests/curriculum.unit.test.js tests/curriculum.integration.test.js tests/routing.compat.test.js tests/simple-router.unit.test.js tests/app-routing.integration.test.js tests/rotation-interaction.test.js",
     "test:ui": "node --test --test-concurrency=1 tests/ui/navigation.ui.test.js",
     "check": "node --check app.js && node --check content/curriculum.js && node --check content/progress.js && node --check routing/simple-router.js && node --check middleware.js && node --check proxy.js && node --check seo.js && node --check api/robots.js && node --check api/sitemap.js && node scripts/check-proxy.mjs && node scripts/check-seo.mjs && node scripts/check-fonts.mjs && node scripts/check-stickers.mjs && node scripts/check-curriculum.mjs && node scripts/check-app-v2.mjs && node scripts/check-ux-p1.mjs && node scripts/check-ux-p2.mjs && node scripts/check-completion-focus.mjs && npm test"

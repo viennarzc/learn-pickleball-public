@@ -19,9 +19,10 @@ A mobile-first prototype for learning pickleball through a guided path, interact
 
 ## Run locally
 
-Serve the folder with any static server. For example:
+Set `SUPPORT_EMAIL` in `.env.local` (for example, `SUPPORT_EMAIL=support@viennci.dev`), then generate the public contact configuration and serve the folder:
 
 ```bash
+node --env-file=.env.local scripts/build-contact.mjs
 python3 -m http.server 4173 --bind 127.0.0.1
 ```
 
@@ -49,6 +50,8 @@ The production posture supports search discovery without removing the scraper gu
 - `/robots.txt` and `/sitemap.xml` are Vercel functions. They derive the correct production origin from each request, so the sitemap never hard-codes a preview domain.
 - Search engines and link-preview bots are not rejected merely because their user agent contains `bot`. The Routing Middleware returns `403` only for named AI collectors, common SEO-scraper products, command-line fetchers, and browser-automation clients.
 - The app and public lesson pages use only same-origin scripts, styles, images, and fonts. No learner data is sent to third parties.
+
+Set `SUPPORT_EMAIL` as a Config environment variable in Vercel for Production, Preview, and Development. The build requires it and publishes the address in the support page configuration; it is not a secret. Redeploy after changing it.
 
 Before a public launch, configure the Vercel dashboard as well:
 
@@ -138,6 +141,8 @@ npm run test:ui   # optional: real-browser navigation tests, needs Chrome/Chromi
 ```
 
 The validation gate checks syntax, request policy, SEO, assets, curriculum, and v2 contracts. `npm run test:ui` opens the root page in headless Chrome/Chromium and clicks (desktop) or taps (mobile) every navigation tab; set `CHROME_PATH` if the browser is not found. It is not part of `npm run check`, because the Vercel build has no browser. Accessibility testing remains separate; see the architecture guide.
+
+GitHub Actions runs `npm run check` on Node.js 22 for pull requests and pushes to `main`. The security workflow also runs `npm audit` and CodeQL on those events and weekly on `main`. The npm audit reports known advisories and fails on high or critical findings. CodeQL findings appear under **Security → Code scanning**. The separate Gitleaks workflow checks for committed secrets on pushes and pull requests. Once these workflows are on `main`, you can also start them manually from the **Actions** tab.
 
 ## Content boundaries
 
