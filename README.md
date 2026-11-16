@@ -19,9 +19,10 @@ A mobile-first prototype for learning pickleball through a guided path, interact
 
 ## Run locally
 
-Serve the folder with any static server. For example:
+Set `SUPPORT_EMAIL` in `.env.local` (for example, `SUPPORT_EMAIL=support@viennci.dev`), then generate the public contact configuration and serve the folder:
 
 ```bash
+node --env-file=.env.local scripts/build-contact.mjs
 python3 -m http.server 4173 --bind 127.0.0.1
 ```
 
@@ -39,6 +40,8 @@ The production posture supports search discovery without removing the scraper gu
 - `/robots.txt` and `/sitemap.xml` are Vercel functions. They derive the correct production origin from each request, so the sitemap never hard-codes a preview domain.
 - Search engines and link-preview bots are not rejected merely because their user agent contains `bot`. The Routing Middleware returns `403` only for named AI collectors, common SEO-scraper products, command-line fetchers, and browser-automation clients.
 - The app and public lesson pages use only same-origin scripts, styles, images, and fonts. No learner data is sent to third parties.
+
+Set `SUPPORT_EMAIL` as a Config environment variable in Vercel for Production, Preview, and Development. The build requires it and publishes the address in the support page configuration; it is not a secret. Redeploy after changing it.
 
 Before a public launch, configure the Vercel dashboard as well:
 

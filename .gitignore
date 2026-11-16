@@ -84,3 +84,6 @@ pnpm-debug.log*
 *.pfx
 *.jks
 *.keystore
+
+# Generated public configuration.
+/support/config.js
