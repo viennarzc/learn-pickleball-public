@@ -409,6 +409,11 @@ h3 { font-size: clamp(1.25rem, 2vw, 1.55rem); }
 .scoring-formats { margin-bottom: 16px; }
 .scoring-formats [aria-pressed="true"] { border-color: var(--green); background: var(--green-soft); color: var(--green-hover); }
 .scoring-unit-link { padding: 6px 14px; }
+.scoring-simulator { margin-top: 24px; }
+.scoring-simulator h2 { margin-bottom: 8px; }
+.scoring-scenarios { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 16px; }
+.scoring-scenarios > span { font-weight: 800; }
+.scoring-sim-actions { gap: 8px; }
 
 .scoring-panel {
   padding: clamp(12px, 3vw, 28px);

@@ -42,7 +42,7 @@ function doublesPlayer(team, score, side) {
   return players[team][side === evenSide(score) ? 0 : 1];
 }
 
-function afterRally(state, winner, doubles) {
+export function afterRally(state, winner, doubles) {
   const { scores, serving, number, side } = state;
   if (winner === serving) {
     return { scores: { ...scores, [winner]: scores[winner] + 1 }, serving, number, side: oppositeSide(side) };
@@ -53,24 +53,31 @@ function afterRally(state, winner, doubles) {
   return { scores, serving: winner, number: 1, side: doubles ? "right" : evenSide(scores[winner]) };
 }
 
+export function initialScoringState() {
+  return { scores: { blue: 0, violet: 0 }, serving: "blue", number: 2, side: "right" };
+}
+
+function describeState(state, doubles) {
+  const { scores, serving, number, side } = state;
+  const receiving = opponent(serving);
+  const server = doubles ? doublesPlayer(serving, scores[serving], side) : players[serving][0];
+  const court = Object.entries(players).flatMap(([team, names]) => names.slice(0, doubles ? 2 : 1).map((name, index) => ({
+    name, team,
+    side: doubles ? (index === 0 ? evenSide(scores[team]) : oppositeSide(evenSide(scores[team]))) : side,
+    serving: name === server,
+  })));
+  const call = [scores[serving], scores[receiving]];
+  if (doubles) call.push(number);
+  return { serving, receiving, side, server, call, court };
+}
+
 function buildSlides(format) {
   const { opening, rallies } = examples[format];
   const doubles = format === "doubles";
-  let state = { scores: { blue: 0, violet: 0 }, serving: "blue", number: 2, side: "right" };
+  let state = initialScoringState();
   return [opening, ...rallies.map(([_, title, explanation]) => [title, explanation])].map(([title, explanation], index) => {
     if (index > 0) state = afterRally(state, rallies[index - 1][0], doubles);
-    const { scores, serving, number, side } = state;
-    const receiving = opponent(serving);
-    const server = doubles ? doublesPlayer(serving, scores[serving], side) : players[serving][0];
-    const court = Object.entries(players).flatMap(([team, names]) => names.slice(0, doubles ? 2 : 1).map((name, index) => ({
-      name,
-      team,
-      side: doubles ? (index === 0 ? evenSide(scores[team]) : oppositeSide(evenSide(scores[team]))) : side,
-      serving: name === server,
-    })));
-    const call = [scores[serving], scores[receiving]];
-    if (doubles) call.push(number);
-    return { title, explanation, serving, receiving, side, server, call, court };
+    return { title, explanation, ...describeState(state, doubles) };
   });
 }
 
@@ -109,6 +116,27 @@ export function renderScoringWalkthrough() {
       </div>
       <p class="scoring-announcement" data-scoring-announcement role="status" aria-atomic="true"></p>
     </div>
+    <section class="scoring-panel scoring-simulator" aria-labelledby="simulator-title">
+      <h2 id="simulator-title">Try a rally</h2>
+      <p>Choose who wins each rally and see what happens to the score and the next serve.</p>
+      <div class="scoring-formats" role="group" aria-label="Simulation format">
+        <button class="button button-secondary" type="button" data-sim-format="doubles" aria-pressed="true">Doubles</button>
+        <button class="button button-secondary" type="button" data-sim-format="singles" aria-pressed="false">Singles</button>
+      </div>
+      <div class="scoring-scenarios" role="group" aria-label="Starting scenarios" data-sim-scenarios></div>
+      <div class="scoring-slide">
+        <div class="scoring-diagram" data-sim-diagram role="img"></div>
+        <div class="scoring-copy">
+          <div class="scoring-call" data-sim-call role="group"></div>
+          <p data-sim-status role="status" aria-live="polite"></p>
+          <div class="button-row scoring-sim-actions">
+            <button class="button button-primary" type="button" data-sim-winner="serving">Serving side wins</button>
+            <button class="button button-secondary" type="button" data-sim-winner="receiving">Receiving side wins</button>
+            <button class="button button-quiet" type="button" data-sim-reset>Reset</button>
+          </div>
+        </div>
+      </div>
+    </section>
   </section>`;
 }
 
@@ -155,6 +183,46 @@ export function mountScoringWalkthrough(root) {
   let answer = null;
   let timer;
   let diagramKey;
+  let simFormat = "doubles";
+  let simState = initialScoringState();
+  let simFinished = false;
+  const simDiagram = root.querySelector("[data-sim-diagram]");
+  const simCall = root.querySelector("[data-sim-call]");
+  const simStatus = root.querySelector("[data-sim-status]");
+  const simScenarios = root.querySelector("[data-sim-scenarios]");
+  const simWinnerButtons = [...root.querySelectorAll("[data-sim-winner]")];
+
+  function showSimulation(message) {
+    const slide = describeState(simState, simFormat === "doubles");
+    renderDiagram(simDiagram, slide, !simFinished, !simFinished);
+    const labels = [`${teamNames[slide.serving]} · serving`, `${teamNames[slide.receiving]} · receiving`, "Server #"];
+    simCall.innerHTML = slide.call.map((score, index) => `<div${index < 2 ? ` data-team="${index === 0 ? slide.serving : slide.receiving}"` : ""}><span>${labels[index]}</span><strong>${score}</strong></div>`).join("");
+    simCall.setAttribute("aria-label", `Score call ${slide.call.join("–")}`);
+    simStatus.textContent = simFinished ? message : `${message} ${slide.server} serves from ${teamNames[slide.serving]}’s ${slide.side}. Call ${slide.call.join("–")}.`;
+    simWinnerButtons.forEach((button) => { button.disabled = simFinished; });
+  }
+
+  function loadScenarios() {
+    const scenarios = simFormat === "doubles"
+      ? [["opening", "Opening serve"], ["partner", "First server loses"], ["sideout", "Second server loses"]]
+      : [["opening", "Opening serve"], ["odd", "Odd score"], ["sideout", "Receiving player wins"]];
+    simScenarios.innerHTML = `<span>Start with:</span>${scenarios.map(([id, label]) => `<button class="button button-quiet" type="button" data-sim-scenario="${id}">${label}</button>`).join("")}`;
+  }
+
+  function loadScenario(name) {
+    const doubles = simFormat === "doubles";
+    simState = initialScoringState();
+    if (name === "partner" || (name === "sideout" && doubles)) simState = afterRally(simState, "violet", true);
+    if (name === "sideout" && doubles) simState = afterRally(simState, "blue", true);
+    if (name === "odd" || (name === "sideout" && !doubles)) simState = afterRally(simState, "blue", false);
+    simFinished = false;
+    const prompt = name === "partner" ? "Violet’s first server is serving. What happens if the receiving side wins?"
+      : name === "sideout" && doubles ? "Violet’s second server is serving. What happens if the receiving side wins?"
+      : name === "sideout" ? "Blue is serving with one point. What happens if the receiving side wins?"
+      : name === "odd" ? "Blue has an odd score. What happens when the serving side wins again?"
+      : "The game starts at zero.";
+    showSimulation(prompt);
+  }
 
   function stopAutoplay() {
     clearTimeout(timer);
@@ -233,6 +301,34 @@ export function mountScoringWalkthrough(root) {
   }
 
   root.addEventListener("click", (event) => {
+    const simFormatButton = event.target.closest("[data-sim-format]");
+    if (simFormatButton) {
+      if (simFormatButton.dataset.simFormat !== simFormat) {
+        simFormat = simFormatButton.dataset.simFormat;
+        root.querySelectorAll("[data-sim-format]").forEach((button) => button.setAttribute("aria-pressed", String(button === simFormatButton)));
+        loadScenarios();
+        loadScenario("opening");
+      }
+      return;
+    }
+    const scenarioButton = event.target.closest("[data-sim-scenario]");
+    if (scenarioButton) { loadScenario(scenarioButton.dataset.simScenario); return; }
+    if (event.target.closest("[data-sim-reset]")) { loadScenario("opening"); return; }
+    const winnerButton = event.target.closest("[data-sim-winner]");
+    if (winnerButton && !simFinished) {
+      const servingWon = winnerButton.dataset.simWinner === "serving";
+      const previous = simState;
+      const winner = servingWon ? previous.serving : opponent(previous.serving);
+      simState = afterRally(previous, winner, simFormat === "doubles");
+      const score = simState.scores[winner];
+      simFinished = servingWon && score >= 11 && score - simState.scores[opponent(winner)] >= 2;
+      const message = simFinished ? `${teamNames[winner]} wins ${score}–${simState.scores[opponent(winner)]}. Reset to play again.`
+        : servingWon ? `${teamNames[winner]} scores a point and the server changes sides.`
+        : simFormat === "doubles" && previous.number === 1 ? "No point. The serve passes to the partner as server 2."
+        : "No point. Side-out: the receiving side takes the serve.";
+      showSimulation(message);
+      return;
+    }
     const formatButton = event.target.closest("[data-scoring-format]");
     if (formatButton && formatButton.dataset.scoringFormat !== format) {
       stopAutoplay();
@@ -278,5 +374,7 @@ export function mountScoringWalkthrough(root) {
   });
 
   update();
+  loadScenarios();
+  loadScenario("opening");
   return stopAutoplay;
 }

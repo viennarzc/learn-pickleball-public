@@ -109,6 +109,7 @@ for (const device of DEVICES) {
 }
 
 const scoringControl = (control) => `[data-scoring-control="${control}"]`;
+const walkDiagram = '[data-scoring-diagram]';
 const scoringState = `({
   call: [...document.querySelectorAll("[data-scoring-call] strong")].map((number) => +number.textContent),
   server: document.querySelector(".scoring-player.is-serving span")?.textContent,
@@ -192,15 +193,16 @@ for (const viewport of [
       await page.goto(`${server.url}/#/scoring`);
       await page.waitFor('document.querySelector("main")?.dataset.view === "scoring"');
       await page.evaluate('document.documentElement.style.scrollBehavior = "auto"');
-      assert.equal(await page.evaluate('!!document.querySelector(".scoring-serve-ball")'), false);
+      assert.equal(await page.evaluate(`!!document.querySelector('${walkDiagram} .scoring-serve-ball')`), false);
       for (const format of ["doubles", "singles"]) {
         if (format === "singles") await page.click('[data-scoring-format="singles"]');
         for (let step = 0; step < 5; step++) {
           await page.click(scoringControl("next"));
           const actual = await page.evaluate(`(() => {
-            const ball = document.querySelector('.scoring-serve-ball');
-            const player = document.querySelector('.scoring-player.is-serving');
-            const court = document.querySelector('.scoring-court').getBoundingClientRect();
+            const diagram = document.querySelector('[data-scoring-diagram]');
+            const ball = diagram.querySelector('.scoring-serve-ball');
+            const player = diagram.querySelector('.scoring-player.is-serving');
+            const court = diagram.querySelector('.scoring-court').getBoundingClientRect();
             const animation = ball.getAnimations()[0];
             if (animation) { animation.pause(); animation.currentTime = 0; }
             const start = ball.getBoundingClientRect();
@@ -223,11 +225,11 @@ for (const viewport of [
           assert.equal(actual.width, viewport.width);
         }
         await page.click(scoringControl("next"));
-        assert.equal(await page.evaluate('!!document.querySelector(".scoring-serve-ball")'), false);
+        assert.equal(await page.evaluate(`!!document.querySelector('${walkDiagram} .scoring-serve-ball')`), false);
         await page.click('[data-scoring-answer="1"]');
-        assert.equal(await page.evaluate('!!document.querySelector(".scoring-serve-ball")'), true);
+        assert.equal(await page.evaluate(`!!document.querySelector('${walkDiagram} .scoring-serve-ball')`), true);
         await page.click(scoringControl("back"));
-        assert.equal(await page.evaluate('!!document.querySelector(".scoring-serve-ball")'), true);
+        assert.equal(await page.evaluate(`!!document.querySelector('${walkDiagram} .scoring-serve-ball')`), true);
       }
       assert.deepEqual(page.errors, []);
     } finally {
@@ -235,3 +237,39 @@ for (const viewport of [
     }
   });
 }
+
+it("simulates scoring, service handoffs, scenarios and game completion", async () => {
+  const page = await browser.newPage({ width: 390, height: 844, mobile: true });
+  try {
+    await page.goto(`${server.url}/#/scoring`);
+    await page.waitFor('!!document.querySelector("[data-sim-diagram] .scoring-court")');
+    await page.evaluate('document.documentElement.style.scrollBehavior = "auto"');
+    const state = () => page.evaluate(`({call: [...document.querySelectorAll('[data-sim-call] strong')].map(x => +x.textContent), server: document.querySelector('[data-sim-diagram] .is-serving span')?.textContent, status: document.querySelector('[data-sim-status]').textContent})`);
+    assert.deepEqual((await state()).call, [0, 0, 2]);
+    await page.click('[data-sim-winner="serving"]');
+    assert.deepEqual((await state()).call, [1, 0, 2]);
+    await page.click('[data-sim-winner="receiving"]');
+    assert.equal((await state()).server, "Leo");
+    await page.click('[data-sim-winner="receiving"]');
+    assert.equal((await state()).server, "Sam");
+    await page.click('[data-sim-winner="receiving"]');
+    assert.equal((await state()).server, "Jo");
+    await page.click('[data-sim-scenario="partner"]');
+    assert.equal((await state()).server, "Leo");
+    await page.click('[data-sim-scenario="sideout"]');
+    assert.equal((await state()).server, "Sam");
+    await page.click('[data-sim-format="singles"]');
+    assert.deepEqual((await state()).call, [0, 0]);
+    await page.click('[data-sim-scenario="odd"]');
+    assert.deepEqual((await state()).call, [1, 0]);
+    await page.click('[data-sim-winner="receiving"]');
+    assert.equal((await state()).server, "Leo");
+    await page.click('[data-sim-reset]');
+    for (let i = 0; i < 11; i++) await page.click('[data-sim-winner="serving"]');
+    assert.match((await state()).status, /Blue wins 11–0/);
+    assert.equal(await page.evaluate('document.querySelector("[data-sim-winner=serving]").disabled'), true);
+    await page.click('[data-sim-reset]');
+    assert.deepEqual((await state()).call, [0, 0]);
+    assert.deepEqual(page.errors, []);
+  } finally { await page.close(); }
+});
