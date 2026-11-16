@@ -400,3 +400,8 @@ h3 { font-size: clamp(1.25rem, 2vw, 1.55rem); }
   .lesson-topline { flex-wrap: wrap; gap: 8px; }
   .bottom-nav a { font-size: .78rem; overflow-wrap: anywhere; }
 }
+
+.feedback-prompt { margin: 32px 0; padding: 20px 0; border-top: 1px solid var(--line); }
+.feedback-prompt h2 { font-size: 1.25rem; margin: 0; }
+.feedback-prompt p { margin: 4px 0 8px; color: var(--muted); }
+.footer-support { white-space: nowrap; }
