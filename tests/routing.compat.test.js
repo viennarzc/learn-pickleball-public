@@ -21,10 +21,10 @@ const resolve = (hash) => router.matchRoute(router.parseRoute(hash));
 const routePaths = () => router.ROUTES.map((route) => route.path);
 
 // Every path app.js accepts today, including v1 legacy paths.
-const SUPPORTED_PATHS = ["/", "/home", "/placement", "/learn", "/practice", "/court-lab", "/court", "/quiz", "/library", "/skills", "/resources", "/progress", "/achievements", "/lesson/:lessonId"];
+const SUPPORTED_PATHS = ["/", "/home", "/placement", "/learn", "/scoring", "/practice", "/court-lab", "/court", "/quiz", "/library", "/skills", "/resources", "/progress", "/achievements", "/lesson/:lessonId"];
 
 // Views app.js knows how to render today.
-const APP_VIEWS = ["home", "placement", "learn", "practice", "court", "library", "progress", "lesson"];
+const APP_VIEWS = ["home", "placement", "learn", "scoring", "practice", "court", "library", "progress", "lesson"];
 
 const expectedNavItems = [
   { id: "learn", label: "Learn", shortLabel: "Learn" },

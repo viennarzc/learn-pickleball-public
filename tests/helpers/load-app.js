@@ -8,12 +8,14 @@ import vm from "node:vm";
 import * as curriculum from "../../content/curriculum.js";
 import * as progressModule from "../../content/progress.js";
 import * as routing from "../../routing/simple-router.js";
+import * as scoring from "../../content/scoring-walkthrough.js";
 
 // Router view name -> app.js function that renders it.
 export const VIEW_FUNCTIONS = {
   home: "renderHome",
   placement: "renderPlacement",
   learn: "renderLearn",
+  scoring: "renderScoring",
   practice: "renderPractice",
   court: "renderCourt",
   library: "renderLibrary",
@@ -44,7 +46,7 @@ export function loadApp({ hash = "#/", search = "" } = {}) {
   };
   const previousWindow = globalThis.window;
   globalThis.window = window; // content/progress.js reads storage through the global window
-  const context = { ...curriculum, ...progressModule, ...routing, URLSearchParams, console, setTimeout, clearTimeout, window, document, requestAnimationFrame() {} };
+  const context = { ...curriculum, ...progressModule, ...routing, ...scoring, URLSearchParams, console, setTimeout, clearTimeout, window, document, requestAnimationFrame() {} };
   vm.createContext(context);
   vm.runInContext(source, context);
 
