@@ -129,6 +129,8 @@ npm run test:ui   # optional: real-browser navigation tests, needs Chrome/Chromi
 
 The validation gate checks syntax, request policy, SEO, assets, curriculum, and v2 contracts. `npm run test:ui` opens the root page in headless Chrome/Chromium and clicks (desktop) or taps (mobile) every navigation tab; set `CHROME_PATH` if the browser is not found. It is not part of `npm run check`, because the Vercel build has no browser. Accessibility testing remains separate; see the architecture guide.
 
+GitHub Actions runs `npm run check` on Node.js 22 for pull requests and pushes to `main`. The security workflow also runs `npm audit` and CodeQL on those events and weekly on `main`. The npm audit reports known advisories and fails on high or critical findings. CodeQL findings appear under **Security → Code scanning**. The separate Gitleaks workflow checks for committed secrets on pushes and pull requests. Once these workflows are on `main`, you can also start them manually from the **Actions** tab.
+
 ## Content boundaries
 
 - The current GPF and USA Pickleball rules are the factual baseline.
