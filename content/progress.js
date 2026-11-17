@@ -96,7 +96,7 @@ export function normalizeLessonEntry(lesson) {
     requiredPages: uniqueArrayOrEmpty(stored.requiredPages),
     optionalPages: uniqueArrayOrEmpty(stored.optionalPages),
     attempts: objectOrEmpty(stored.attempts),
-    conceptUnderstood: Boolean(stored.conceptUnderstood),
+    conceptUnderstood: stored.conceptUnderstood === true,
     practiceLogs: arrayOrEmpty(stored.practiceLogs),
   };
 }
@@ -174,6 +174,14 @@ export function clearProgress(key = STORE_KEY) {
   return tryStorageWrite((storage) => storage.removeItem(key));
 }
 
+// Clears only the given key (older keys such as v1 are left untouched) and
+// returns fresh progress. The in-memory reset always succeeds; `cleared` is
+// false when storage could not be updated, so callers can show a notice.
+export function resetProgress(key = STORE_KEY) {
+  const cleared = clearProgress(key);
+  return { progress: createFreshProgress(), cleared };
+}
+
 function createFreshLessonProgress() {
   return {
     requiredPages: [],
@@ -208,4 +216,62 @@ export function recordPractice(progress, lessonId, mode) {
   getLessonProgress(progress, lessonId).practiceLogs.push(entry);
   progress.practiceLogs.push(entry);
   return entry;
+}
+
+// --- Lesson completion summary ---------------------------------------------
+// Core and optional lessons are tracked separately. Optional deep dives must
+// never count toward the core path, or the Learn page can report impossible
+// totals such as "29 of 20 core concepts understood".
+
+// A lesson is finished only when it has required pages and every one of them
+// is recorded. A lesson with no required pages can never be finished, so an
+// optional reference page alone can never complete (and count) a lesson.
+export function hasCompletedRequiredPages(lessonProgress, requiredPageIds) {
+  const required = arrayOrEmpty(requiredPageIds);
+  const recorded = arrayOrEmpty(lessonProgress?.requiredPages);
+  const hasRequiredPages = required.length > 0;
+  const allRequiredRecorded = required.every((pageId) => recorded.includes(pageId));
+  return hasRequiredPages && allRequiredRecorded;
+}
+
+export function isOptionalLesson(lesson) {
+  return Boolean(lesson?.optional || lesson?.core === false);
+}
+
+// Reads stored progress without creating a lesson record (unlike getLessonProgress).
+// Only a boolean true counts. Completion is sticky by design: once a lesson is
+// complete it stays counted, even if a later curriculum update adds a required
+// page, so learners never lose progress (or deep-dive access) after an update.
+export function isConceptUnderstood(progress, lessonId) {
+  return progress?.lessonProgress?.[lessonId]?.conceptUnderstood === true;
+}
+
+export function countCompleted(progress, lessons) {
+  return {
+    completed: lessons.filter((lesson) => isConceptUnderstood(progress, lesson.id)).length,
+    total: lessons.length,
+  };
+}
+
+// Each lesson id is counted once (its first entry decides core vs optional),
+// and entries without an id are skipped, so completed can never exceed total.
+export function uniqueLessons(lessons) {
+  const seenIds = new Set();
+  return arrayOrEmpty(lessons).filter((lesson) => {
+    const id = lesson?.id;
+    const hasStringId = typeof id === "string";
+    const hasNonEmptyId = hasStringId && id.length > 0;
+    const isDuplicateId = hasNonEmptyId && seenIds.has(id);
+    const shouldKeep = hasNonEmptyId && !isDuplicateId;
+    if (shouldKeep) seenIds.add(id);
+    return shouldKeep;
+  });
+}
+
+// Counts only lessons in the given curriculum, so stale stored ids never count.
+export function summarizeLessonCompletion(progress, lessons, isOptional = isOptionalLesson) {
+  const core = [];
+  const optional = [];
+  for (const lesson of uniqueLessons(lessons)) (isOptional(lesson) ? optional : core).push(lesson);
+  return { core: countCompleted(progress, core), optional: countCompleted(progress, optional) };
 }
