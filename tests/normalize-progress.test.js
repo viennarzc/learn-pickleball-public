@@ -179,8 +179,9 @@ describe("normalizeLessonEntry (step 2b)", () => {
     }), emptyLesson);
   });
 
-  it("coerces conceptUnderstood to a boolean", () => {
-    assert.equal(normalizeLessonEntry({ conceptUnderstood: "yes" }).conceptUnderstood, true);
+  it("keeps conceptUnderstood only when it is a boolean true", () => {
+    assert.equal(normalizeLessonEntry({ conceptUnderstood: true }).conceptUnderstood, true);
+    assert.equal(normalizeLessonEntry({ conceptUnderstood: "yes" }).conceptUnderstood, false);
     assert.equal(normalizeLessonEntry({ conceptUnderstood: "" }).conceptUnderstood, false);
   });
 
@@ -196,7 +197,7 @@ describe("normalizeLessonProgress (step 2 = 2a then 2b)", () => {
       "equipment-safety": null,
       "removed-lesson": { requiredPages: ["old-page"] },
     }, lessonIds), {
-      "court-orientation": { ...emptyLesson, requiredPages: ["why-court"], conceptUnderstood: true },
+      "court-orientation": { ...emptyLesson, requiredPages: ["why-court"], conceptUnderstood: false },
       "equipment-safety": emptyLesson,
     });
   });

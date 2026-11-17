@@ -13,16 +13,20 @@ import {
 import {
   STUDY_CONDITIONS,
   COURT_ZONES,
-  createFreshProgress,
   studyCondition,
   progressKey,
   loadProgress,
   saveProgress,
+  createFreshProgress,
   clearProgress,
   getLessonProgress,
   recordPage,
   recordAttempt,
   recordPractice,
+  summarizeLessonCompletion,
+  isOptionalLesson,
+  isConceptUnderstood,
+  hasCompletedRequiredPages,
 } from "./content/progress.js";
 import { parseRoute, matchRoute, href, titled, NAV_ITEMS } from "./routing/simple-router.js";
 import { renderScoringWalkthrough, mountScoringWalkthrough } from "./content/scoring-walkthrough.js";
@@ -85,6 +89,7 @@ let courtFeedback = null;
 let activeSticker = null;
 let pendingLessonFocus = null;
 let resetArmed = false;
+let resetError = false;
 let libraryFilter = "All topics";
 let libraryQuery = "";
 let pageSelections = {};
@@ -146,7 +151,7 @@ function getUnit(lesson) {
 }
 
 function isOptional(lesson) {
-  return Boolean(lesson.optional || lesson.core === false || getUnit(lesson)?.optional);
+  return isOptionalLesson(lesson) || Boolean(getUnit(lesson)?.optional);
 }
 
 function requiredPages(lesson) {
@@ -154,8 +159,7 @@ function requiredPages(lesson) {
 }
 
 function isLessonComplete(lesson) {
-  const stored = progress.lessonProgress[lesson.id];
-  return Boolean(stored?.conceptUnderstood);
+  return isConceptUnderstood(progress, lesson.id);
 }
 
 function hasLessonActivity(stored) {
@@ -176,7 +180,8 @@ function prerequisitesFor(lesson) {
 }
 
 function allCoreLessonsComplete() {
-  return lessons.filter((lesson) => !isOptional(lesson)).every(isLessonComplete);
+  const { core } = lessonCompletion();
+  return core.completed === core.total;
 }
 
 function hasDeepDiveAccess() {
@@ -218,9 +223,11 @@ function getNextLesson() {
   return candidates.find((lesson) => isLessonAvailable(lesson) && !isLessonComplete(lesson)) || null;
 }
 
+// Completion is sticky: once set, conceptUnderstood is never cleared here, so a
+// lesson stays counted even if the curriculum later adds a required page.
 function updateConceptStatus(lesson) {
   const stored = getLessonProgress(progress, lesson.id);
-  const complete = requiredPages(lesson).every((page) => stored.requiredPages.includes(page.id));
+  const complete = hasCompletedRequiredPages(stored, requiredPages(lesson).map((page) => page.id));
   if (complete && !stored.conceptUnderstood) {
     stored.conceptUnderstood = true;
     const sticker = stickers[lesson.id];
@@ -232,7 +239,10 @@ function updateConceptStatus(lesson) {
   return stored.conceptUnderstood;
 }
 
+// Pages are only recorded for lessons the learner can open: available ones, or
+// completed ones being reviewed. A locked lesson can never be recorded or counted.
 function recordLessonPage(lesson, page, required = page.required !== false) {
+  if (!isLessonAvailable(lesson) && !isLessonComplete(lesson)) return false;
   const wasComplete = isLessonComplete(lesson);
   recordPage(progress, lesson.id, page.id, { required });
   updateConceptStatus(lesson);
@@ -243,6 +253,7 @@ function recordLessonPage(lesson, page, required = page.required !== false) {
     window.history.replaceState(null, "", href(route.path, route.query));
   }
   persist();
+  return true;
 }
 
 function getPageIndex(lesson, route) {
@@ -260,8 +271,9 @@ function nextPage(lesson, index) {
 }
 
 function resolveLesson(rawId) {
-  if (getLesson(rawId)) return { lesson: getLesson(rawId), alias: null };
-  const completedIds = lessons.filter(isLessonComplete).map((lesson) => lesson.id);
+  const direct = getLesson(rawId);
+  if (direct) return { lesson: direct, alias: null };
+  const completedIds = completedLessons().map((lesson) => lesson.id);
   const resolved = typeof resolveLegacyLessonId === "function" ? resolveLegacyLessonId(rawId, completedIds) : legacyLessonAliases?.[rawId];
   const id = typeof resolved === "string" ? resolved : resolved?.lessonId || resolved?.defaultLessonId;
   return { lesson: getLesson(id), alias: rawId };
@@ -327,7 +339,7 @@ function renderHome(route) {
       : refresherLink("Quick refresher", { primary: true }) + reviewCompleted;
   return renderShell(`
     <section class="screen-intro page">
-      <div><p class="eyebrow">Your next learning step</p><h1>${next ? escapeHtml(next.title) : "You have built a reliable foundation."}</h1><p class="lede">${next ? escapeHtml(next.outcome || next.summary) : "Review a rule, add a practice note, or choose an optional deep-dive topic when it feels useful."}</p><p class="session-duration">${next ? `Estimated time: ${escapeHtml(next.duration || "Short lesson")}` : "Review what you have learned or find another topic."}</p><div class="button-row">${homeActions}<a class="button button-quiet" data-cta-priority="quiet" href="#/learn">View full path</a>${goalAction}${study ? '<a class="button button-quiet" href="#/library?view=rules">Find a rule or skill</a>' : next ? refresherLink() : ""}</div><p class="inline-progress"><span>${completedLessonCount()} concept steps understood</span><span>${practiceCount()} practices logged</span></p></div>
+      <div><p class="eyebrow">Your next learning step</p><h1>${next ? escapeHtml(next.title) : "You have built a reliable foundation."}</h1><p class="lede">${next ? escapeHtml(next.outcome || next.summary) : "Review a rule, add a practice note, or choose an optional deep-dive topic when it feels useful."}</p><p class="session-duration">${next ? `Estimated time: ${escapeHtml(next.duration || "Short lesson")}` : "Review what you have learned or find another topic."}</p><div class="button-row">${homeActions}<a class="button button-quiet" data-cta-priority="quiet" href="#/learn">View full path</a>${goalAction}${study ? '<a class="button button-quiet" href="#/library?view=rules">Find a rule or skill</a>' : next ? refresherLink() : ""}</div><p class="inline-progress"><span>${coreCompletedCount()} concept steps understood</span><span>${practiceCount()} practices logged</span></p></div>
       <figure class="hero-figure"><img src="${escapeHtml(normalizeImage(next?.illustration, next)?.src || "assets/hero-rally.png")}" alt="${escapeHtml(normalizeImage(next?.illustration, next)?.alt || "Pickleball players learning together.")}" /></figure>
     </section>
     <section class="page next-strip"><span class="status is-current">${unit ? `Unit ${unit.number}` : "Review"}</span><div><strong>${next ? `${escapeHtml(next.duration || "Short lesson")} · ${escapeHtml(next.kind || "Guided lesson")}` : "Your path remains open."}</strong><span>${next ? "One focused idea, then a clear next move." : "Optional units never block your beginner completion."}</span></div>${next ? `<a class="button button-quiet" data-cta-priority="quiet" href="#/practice">Open practice</a>` : ""}</section>`, route);
@@ -375,13 +387,24 @@ function placementExplanation(entryId, target) {
 }
 
 function completedLessons() { return lessons.filter(isLessonComplete); }
-function completedLessonCount() { return completedLessons().length; }
+// Optional deep dives are tracked separately and never count toward core progress.
+function lessonCompletion() { return summarizeLessonCompletion(progress, lessons, isOptional); }
+function coreCompletedCount() { return lessonCompletion().core.completed; }
+// Optional deep dives are tracked apart from core progress and shown in their
+// own smaller line, so they never read as part of the core count. Takes only
+// the { completed, total } counts; renders nothing when there are no optional lessons.
+function renderOptionalProgress(optional) {
+  const completed = Number(optional?.completed) || 0;
+  const total = Number(optional?.total) || 0;
+  if (total === 0) return "";
+  return `<p class="optional-progress" data-optional-progress>${completed} of ${total} optional lessons completed</p>`;
+}
 function practiceCount() { return progress.practiceLogs.length; }
 
 function renderLearn(route) {
   const next = getNextLesson();
   const completedList = completedLessons();
-  const completed = completedList.length;
+  const { core, optional } = lessonCompletion();
   const atlasOpen = study === STUDY_CONDITIONS.ATLAS && route.query.get("view") === "atlas";
   const learnAction = !study && !hasLearningActivity()
     ? '<a class="button button-primary" data-cta-priority="primary" href="#/placement">Choose a learning goal</a>'
@@ -392,7 +415,7 @@ function renderLearn(route) {
     ? '<a class="button button-quiet" data-cta-priority="quiet" href="#/placement">Choose a learning goal</a>'
     : "";
   return renderShell(`
-    <section class="screen-intro page path-intro"><div><p class="eyebrow">Your learning path</p><h1>One calm step closer to court-ready.</h1><p class="lede">Build court skills one step at a time, or find the topic you need.</p><div class="button-row">${learnAction}<a class="button button-quiet" href="#/learn?review=completed">Review completed lessons</a>${goalAction}${study ? '<a class="button button-quiet" href="#/library?view=rules">Find a rule or skill</a>' : refresherLink()}</div><p class="inline-progress"><span>${completed} of ${lessons.filter((lesson) => !isOptional(lesson)).length} core concepts understood</span><span>${practiceCount()} practice logs</span></p></div><figure class="hero-figure hero-figure-stance"><img src="assets/illustrations/stances-ready-v2.png" alt="Four adult players demonstrate balanced ready positions." /></figure></section>
+    <section class="screen-intro page path-intro"><div><p class="eyebrow">Your learning path</p><h1>One calm step closer to court-ready.</h1><p class="lede">Build court skills one step at a time, or find the topic you need.</p><div class="button-row">${learnAction}<a class="button button-quiet" href="#/learn?review=completed">Review completed lessons</a>${goalAction}${study ? '<a class="button button-quiet" href="#/library?view=rules">Find a rule or skill</a>' : refresherLink()}</div><p class="inline-progress"><span>${core.completed} of ${core.total} core concepts understood</span><span>${practiceCount()} practice logs</span></p>${renderOptionalProgress(optional)}</div><figure class="hero-figure hero-figure-stance"><img src="assets/illustrations/stances-ready-v2.png" alt="Four adult players demonstrate balanced ready positions." /></figure></section>
     ${route.query.get("review") === "completed" ? `<section class="page review-list" aria-labelledby="review-heading"><h2 id="review-heading">Completed lessons</h2>${completedList.length ? completedList.map((lesson) => `<a class="review-link" href="${href(`/lesson/${lesson.id}`)}">${escapeHtml(lesson.title)} <span>Review</span></a>`).join("") : '<p>No completed lessons yet. Your completed lessons will appear here.</p>'}</section>` : ""}
     ${study === STUDY_CONDITIONS.DISCOVERY ? `<section class="page study-goals" aria-labelledby="study-goals-title"><h2 id="study-goals-title">Choose what helps today</h2><p>Choose a starting route or explore a situation. Your completed lessons remain saved.</p><div class="button-row"><button type="button" class="button button-quiet" data-action="study-entry" data-entry="first-game-essentials">Prepare for my first game</button><button type="button" class="button button-quiet" data-action="study-entry" data-entry="consistency">Build consistency</button></div><h3>Find a skill for your situation</h3><div class="button-row">${situations.map((item) => `<a data-situation-link class="button button-quiet" href="${href("/library", { view: "skills", situation: item.id })}">${escapeHtml(item.label)}</a>`).join("")}</div></section>` : ""}
     <section class="page"><div class="path-heading"><div><p class="eyebrow">Seven units</p><h2>Follow the sequence—or open the part you need.</h2></div><span class="meta">Required pages drive progress; optional references never block it.</span></div>${study === STUDY_CONDITIONS.ATLAS ? `<div class="button-row atlas-switch"><a class="button button-quiet" href="${atlasOpen ? "#/learn" : "#/learn?view=atlas"}">${atlasOpen ? "Show learning path" : "Explore the course Atlas"}</a></div>` : ""}${atlasOpen ? renderAtlas() : `<div class="path-list" aria-label="Pickleball learning path">${curriculumUnits.map(renderUnit).join("")}</div>`}</section>`, route);
@@ -473,7 +496,7 @@ function activityKey(lesson, page) { return `${lesson.id}:${page.id}`; }
 function getActionLessonPage(target) {
   const lesson = getLesson(target.dataset.lesson);
   const page = lesson?.pages?.find((item) => item.id === target.dataset.page);
-  return lesson && page ? { lesson, page } : null;
+  return lesson && page && (isLessonAvailable(lesson) || isLessonComplete(lesson)) ? { lesson, page } : null;
 }
 
 function correctOptionIndex(activity = {}) {
@@ -690,7 +713,7 @@ function renderLibrary(route) {
 }
 
 function renderProgress(route) {
-  const complete = completedLessonCount();
+  const complete = coreCompletedCount();
   const next = getNextLesson();
   const earned = progress.earnedStickers.map((id) => Object.values(stickers).find((sticker) => sticker.id === id)).filter(Boolean);
   const resumeCue = study ? "Resume opens your next incomplete required page." : next ? "Resume starts at your next incomplete required page." : "";
@@ -698,7 +721,7 @@ function renderProgress(route) {
     ? `<a class="button button-primary" href="${href(`/lesson/${next.id}`)}">Resume: ${escapeHtml(next.title)}</a>`
     : study ? '<a class="button button-primary" href="#/library?view=skills">Choose a review</a>' : refresherLink("Quick refresher", { primary: true });
   const actions = study ? resumeAction : `<div class="progress-actions">${resumeAction}<div class="button-row"><a class="button button-quiet" href="#/learn?review=completed">Review completed lessons</a>${next ? refresherLink() : ""}</div></div>`;
-  return renderShell(`<section class="page"><div class="progress-head"><div><p class="eyebrow">Progress</p><h1>Small wins, useful next steps.</h1><p class="lede">Progress is saved in this browser on this device and does not sync. ${resumeCue ? `${resumeCue} ` : ""}Clearing browser data can erase progress. It is not a rating.</p></div>${actions}</div><div class="progress-summary"><div><strong>${complete}</strong><span>concept steps understood</span></div><div><strong>${practiceCount()}</strong><span>practice logs</span></div><div><strong>${earned.length}</strong><span>keepsakes earned</span></div></div><div class="progress-layout"><section><h2>Continue building</h2><div class="progress-list">${lessons.filter((lesson) => isLessonAvailable(lesson) && !isLessonComplete(lesson)).slice(0, 4).map((lesson) => `<a class="progress-row" href="${href(`/lesson/${lesson.id}`)}"><span><strong>${escapeHtml(lesson.title)}</strong><p>${escapeHtml(lesson.outcome || lesson.summary)}</p></span><span class="status is-current">Open</span></a>`).join("") || '<p class="muted">Your core path is complete. Optional deep dives are ready in Learn and Library.</p>'}</div><details class="reset-details" ${resetArmed ? "open" : ""}><summary>Reset this device’s v2 learning progress</summary><p>This starts the refreshed curriculum again on this browser. It does not change the older v1 key.</p>${resetArmed ? '<div class="button-row"><button class="button button-danger" type="button" data-action="reset-confirm">Reset fresh path</button><button class="button button-quiet" type="button" data-action="reset-cancel">Cancel</button></div>' : '<button class="button button-quiet" type="button" data-action="reset-arm">Reset progress</button>'}</details></section><aside class="progress-aside"><p class="eyebrow">Learning keepsakes</p><h2>${earned.length ? "A few moments worth remembering." : "Your first keepsake will appear here."}</h2>${earned.slice(-3).map((sticker) => `<div class="sticker-line"><img src="${escapeHtml(sticker.asset)}" alt="${escapeHtml(sticker.title)} sticker" /><span><strong>${escapeHtml(sticker.title)}</strong><br /><span class="muted">Earned after a concept step</span></span></div>`).join("") || '<p class="muted">Complete one concept check or explore the Court Lab to collect a small reminder of what you learned.</p>'}</aside></div></section>`, route);
+  return renderShell(`<section class="page"><div class="progress-head"><div><p class="eyebrow">Progress</p><h1>Small wins, useful next steps.</h1><p class="lede">Progress is saved in this browser on this device and does not sync. ${resumeCue ? `${resumeCue} ` : ""}Clearing browser data can erase progress. It is not a rating.</p></div>${actions}</div><div class="progress-summary"><div><strong>${complete}</strong><span>concept steps understood</span></div><div><strong>${practiceCount()}</strong><span>practice logs</span></div><div><strong>${earned.length}</strong><span>keepsakes earned</span></div></div><div class="progress-layout"><section><h2>Continue building</h2><div class="progress-list">${lessons.filter((lesson) => isLessonAvailable(lesson) && !isLessonComplete(lesson)).slice(0, 4).map((lesson) => `<a class="progress-row" href="${href(`/lesson/${lesson.id}`)}"><span><strong>${escapeHtml(lesson.title)}</strong><p>${escapeHtml(lesson.outcome || lesson.summary)}</p></span><span class="status is-current">Open</span></a>`).join("") || '<p class="muted">Your core path is complete. Optional deep dives are ready in Learn and Library.</p>'}</div><details class="reset-details" ${resetArmed ? "open" : ""}><summary>Reset this device’s v2 learning progress</summary><p>This starts the refreshed curriculum again on this browser. It does not change the older v1 key.</p>${resetError ? '<p role="alert">Couldn’t reset progress. Try again.</p>' : ""}${resetArmed ? '<div class="button-row"><button class="button button-danger" type="button" data-action="reset-confirm">Reset fresh path</button><button class="button button-quiet" type="button" data-action="reset-cancel">Cancel</button></div>' : '<button class="button button-quiet" type="button" data-action="reset-arm">Reset progress</button>'}</details></section><aside class="progress-aside"><p class="eyebrow">Learning keepsakes</p><h2>${earned.length ? "A few moments worth remembering." : "Your first keepsake will appear here."}</h2>${earned.slice(-3).map((sticker) => `<div class="sticker-line"><img src="${escapeHtml(sticker.asset)}" alt="${escapeHtml(sticker.title)} sticker" /><span><strong>${escapeHtml(sticker.title)}</strong><br /><span class="muted">Earned after a concept step</span></span></div>`).join("") || '<p class="muted">Complete one concept check or explore the Court Lab to collect a small reminder of what you learned.</p>'}</aside></div></section>`, route);
 }
 
 function renderNotFound(route) {
@@ -843,9 +866,30 @@ function handleAction(event) {
   if (action === "library-clear") { clearTimeout(searchTimer); libraryQuery = ""; libraryFilter = "All topics"; if (study === STUDY_CONDITIONS.DISCOVERY && getRoute().query.has("situation")) window.history.replaceState(null, "", "#/library?view=skills"); render(); requestAnimationFrame(() => document.querySelector('[data-input="library-query"]')?.focus()); return; }
   if (action === "library-view") { clearTimeout(searchTimer); libraryFilter = "All topics"; window.location.hash = `#/library?view=${target.dataset.view}`; return; }
   if (action === "library-filter") { clearTimeout(searchTimer); libraryFilter = target.dataset.filter; render(); requestAnimationFrame(() => [...document.querySelectorAll('[data-action="library-filter"]')].find((button) => button.dataset.filter === libraryFilter)?.focus()); return; }
-  if (action === "reset-arm") { resetArmed = true; render(); return; }
-  if (action === "reset-cancel") { resetArmed = false; render(); return; }
-  if (action === "reset-confirm") { clearProgress(currentProgressKey); if (study) { unitDisclosure = {}; try { window.sessionStorage.removeItem(UNIT_SESSION_KEY); } catch { /* In-memory fallback. */ } } progress = createFreshProgress(); resetArmed = false; activeSticker = null; showToast("Fresh v2 learning path ready."); render({ focusMain: true }); }
+  if (action === "reset-arm") { resetError = false; resetArmed = true; render(); return; }
+  if (action === "reset-cancel") { resetError = false; resetArmed = false; render(); return; }
+  if (action === "reset-confirm") {
+    if (!clearProgress(currentProgressKey)) {
+      resetError = true;
+      render({ focusMain: true });
+      return;
+    }
+    if (study) {
+      unitDisclosure = {};
+      try { window.sessionStorage.removeItem(UNIT_SESSION_KEY); } catch { /* In-memory fallback. */ }
+    }
+    progress = createFreshProgress();
+    pageSelections = {};
+    courtMode = "explore";
+    activeCourtZone = null;
+    courtFeedback = null;
+    activeSticker = null;
+    pendingLessonFocus = null;
+    resetArmed = false;
+    resetError = false;
+    showToast("Fresh v2 learning path ready.");
+    render({ focusMain: true });
+  }
 }
 
 document.addEventListener("click", (event) => {

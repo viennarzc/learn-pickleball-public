@@ -119,6 +119,7 @@ h3 { font-size: clamp(1.25rem, 2vw, 1.55rem); }
 .hero-figure-stance img { object-fit: contain; }
 .inline-progress { display: flex; flex-wrap: wrap; gap: 10px 19px; color: var(--text); font-size: .91rem; font-weight: 800; }
 .inline-progress > span + span { padding-left: 19px; border-left: 1px solid var(--line); }
+.optional-progress { margin: 8px 0 0; color: var(--muted); font-size: .83rem; font-weight: 700; }
 .next-strip { display: grid; grid-template-columns: auto 1fr auto; gap: 20px; align-items: center; padding: 18px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .next-strip strong, .next-strip span { display: block; }
 .next-strip span { color: var(--muted); font-size: .87rem; }
