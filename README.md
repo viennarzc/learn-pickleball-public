@@ -122,7 +122,7 @@ A retailer-generated link credits your affiliate account for qualifying purchase
 
 Legacy routes remain supported: `#/court` and `#/quiz` open Court Lab; `#/skills` and `#/resources` open Library; `#/achievements` opens Progress. Old lesson IDs such as `court-kitchen`, `serve-basics`, `two-bounce`, and `doubles-score` resolve to current lessons, subject to current prerequisites.
 
-Progress uses **`learn-pickleball:v2`** in browser local storage. Required pages and attempts persist; optional practice is recorded separately. Older progress is not migrated, and reset leaves older keys untouched. There is no account or cross-device sync. When writes fail, the app shows a notice and continues in memory; changes may be lost on reload.
+Progress is stored in browser local storage. On the first saved action, existing `learn-pickleball:v2` progress is copied to `learn-pickleball:v2:coordinated`; v1 is not imported. A Web Lock coordinates updates and resets between current tabs. If an older tab changes its separate copy, reload older tabs and choose which copy to use; both copies are retained and can be downloaded from Progress. Reset clears the current record and conflict recovery copies, but the pre-update v2 copy and older v1 data may remain in the browser. There is no account or cross-device sync. If safe storage or Web Locks are unavailable, the app shows a notice and changes remain in that tab only.
 
 ## Completion and rewards
 
@@ -140,9 +140,9 @@ npm run check
 npm run test:ui   # optional: real-browser navigation tests, needs Chrome/Chromium
 ```
 
-The validation gate checks syntax, request policy, SEO, assets, curriculum, and v2 contracts. `npm run test:ui` opens the root page in headless Chrome/Chromium and clicks (desktop) or taps (mobile) every navigation tab; set `CHROME_PATH` if the browser is not found. It is not part of `npm run check`, because the Vercel build has no browser. Accessibility testing remains separate; see the architecture guide.
+The validation gate checks syntax, request policy, SEO, assets, curriculum, and v2 contracts. `npm run test:ui` exercises navigation and shared-storage progress across real tabs in headless Chrome/Chromium; set `CHROME_PATH` if the browser is not found. It is not part of `npm run check`, because the Vercel build has no browser. Accessibility testing remains separate; see the architecture guide.
 
-GitHub Actions runs `npm run check` on Node.js 22 for pull requests and pushes to `main`. The security workflow also runs `npm audit` and CodeQL on those events and weekly on `main`. The npm audit reports known advisories and fails on high or critical findings. CodeQL findings appear under **Security → Code scanning**. The separate Gitleaks workflow checks for committed secrets on pushes and pull requests. Once these workflows are on `main`, you can also start them manually from the **Actions** tab.
+GitHub Actions runs `npm run check` and `npm run test:ui` on Node.js 22 for pull requests and pushes to `main`. The security workflow also runs `npm audit` and CodeQL on those events and weekly on `main`. The npm audit reports known advisories and fails on high or critical findings. CodeQL findings appear under **Security → Code scanning**. The separate Gitleaks workflow checks for committed secrets on pushes and pull requests. Once these workflows are on `main`, you can also start them manually from the **Actions** tab.
 
 ## Content boundaries
 

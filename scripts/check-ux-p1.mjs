@@ -4,6 +4,7 @@ import vm from "node:vm";
 import * as scoring from "../content/scoring-walkthrough.js";
 import * as curriculum from "../content/curriculum.js";
 import * as routing from "../routing/simple-router.js";
+import * as progressStoreModule from "../content/progress-store.js";
 import * as progressModule from "../content/progress.js";
 
 const source = (await readFile(new URL("../app.js", import.meta.url), "utf8"))
@@ -13,13 +14,13 @@ const store = new Map();
 const listeners = {};
 const app = { innerHTML: "" };
 const context = {
-  ...curriculum, ...progressModule, ...routing, ...scoring, URLSearchParams, console, setTimeout, clearTimeout,
-  window: { location: { hash: "#/" }, localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k,v) => store.set(k,v), removeItem: (k) => store.delete(k) }, sessionStorage: { getItem: (k) => session.get(k) ?? null, setItem: (k,v) => session.set(k,v) }, addEventListener() {} },
+  ...curriculum, ...progressModule, ...progressStoreModule, ...routing, ...scoring, URLSearchParams, console, setTimeout, clearTimeout,
+  window: { navigator: { locks: { request: (_name, _options, callback) => Promise.resolve().then(callback) } }, location: { hash: "#/" }, localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k,v) => store.set(k,v), removeItem: (k) => store.delete(k) }, sessionStorage: { getItem: (k) => session.get(k) ?? null, setItem: (k,v) => session.set(k,v) }, addEventListener() {} },
   document: { querySelector: (s) => s === "#app" ? app : null, addEventListener: (type,fn) => { listeners[type] = fn; }, title: "" },
   requestAnimationFrame() {},
 };
 vm.createContext(context);
-vm.runInContext(source + `\nglobalThis.test = { render, renderLibrary, renderSources, renderUnit, rememberUnit, handleAction, getRoute, lessonFocusAfterAction, setProgress: (value) => progress = value, setFilter: (v) => libraryFilter = v, setQuery: (v) => libraryQuery = v, getFilter: () => libraryFilter, getQuery: () => libraryQuery };`, context);
+vm.runInContext(source + `\nglobalThis.test = { render, renderLibrary, renderSources, renderUnit, rememberUnit, handleAction, getRoute, lessonFocusAfterAction, setProgress: (value) => { progress = value; progressGeneration = 0; sessionOnly = false; window.localStorage.setItem(progressStore.recordKey, JSON.stringify({ schema: 1, generation: 0, progress: value, legacyRaw: window.localStorage.getItem(currentProgressKey), recovery: [] })); }, getProgress: () => progress, setFilter: (v) => libraryFilter = v, setQuery: (v) => libraryQuery = v, getFilter: () => libraryFilter, getQuery: () => libraryQuery };`, context);
 const t = context.test;
 const rules = { path: "/library", query: new URLSearchParams("view=rules") };
 assert.match(t.renderLibrary(rules), /volley momentum/);
@@ -81,24 +82,26 @@ const act = (dataset) => t.handleAction({ target: { closest: () => ({ dataset })
 const journey = progressModule.createFreshProgress();
 t.setProgress(journey);
 context.window.location.hash = "#/lesson/court-orientation";
-act({ action: "page-complete", lesson: orientation.id, page: "why-court" });
+await act({ action: "page-complete", lesson: orientation.id, page: "why-court" });
 assert.equal(focused, "[data-lesson-heading]", "advancing a reading page focuses the new heading");
 assert.match(app.innerHTML, /data-lesson-heading>Name the lines/);
-assert.deepEqual([...journey.lessonProgress[orientation.id].requiredPages], ["why-court"]);
+assert.deepEqual([...t.getProgress().lessonProgress[orientation.id].requiredPages], ["why-court"]);
 
+const preparedJourney = t.getProgress();
 for (const page of orientation.pages.filter((item) => item.required && item.id !== "court-recall")) {
-  progressModule.recordPage(journey, orientation.id, page.id);
+  progressModule.recordPage(preparedJourney, orientation.id, page.id);
 }
+t.setProgress(preparedJourney);
 context.window.location.hash = "#/lesson/court-orientation?page=court-recall";
-act({ action: "page-answer", lesson: orientation.id, page: "court-recall", index: "0" });
+await act({ action: "page-answer", lesson: orientation.id, page: "court-recall", index: "0" });
 assert.equal(focused, ".lesson-page .feedback", "an incorrect answer focuses its feedback");
-assert.equal(journey.lessonProgress[orientation.id].conceptUnderstood, false);
-act({ action: "page-answer", lesson: orientation.id, page: "court-recall", index: "1" });
+assert.equal(t.getProgress().lessonProgress[orientation.id].conceptUnderstood, false);
+await act({ action: "page-answer", lesson: orientation.id, page: "court-recall", index: "1" });
 assert.equal(focused, '[data-action="sticker-dismiss"]', "the earned keepsake takes focus first");
-assert.equal(journey.lessonProgress[orientation.id].conceptUnderstood, true);
-act({ action: "sticker-dismiss" });
+assert.equal(t.getProgress().lessonProgress[orientation.id].conceptUnderstood, true);
+await act({ action: "sticker-dismiss" });
 assert.equal(focused, ".lesson-page .feedback", "closing the keepsake returns focus to the answered page");
-const savedJourney = progressModule.loadProgress(new Set(curriculum.curriculumUnits.flatMap((item) => item.lessons.map((lesson) => lesson.id))));
+const savedJourney = JSON.parse(store.get(progressStoreModule.coordinatedKey(progressModule.STORE_KEY))).progress;
 assert.equal(savedJourney.lessonProgress[orientation.id].conceptUnderstood, true, "completion survives reload");
 assert.equal(savedJourney.lessonProgress[orientation.id].attempts["court-recall-check"].count, 2);
 
@@ -116,9 +119,9 @@ assert.match(navigate("#/learn"), /href="#\/placement">Choose a learning goal/);
 assert.match(navigate("#/placement"), /I’m new to pickleball/);
 assert.match(app.innerHTML, /I’m preparing for my first game/);
 for (const [goal, result] of [["never-played", "Start: Court orientation"], ["first-game-essentials", "See First Game Essentials"]]) {
-  act({ action: "set-entry", entry: goal });
+  await act({ action: "set-entry", entry: goal });
   assert.ok(app.innerHTML.includes(result));
-  act({ action: "placement-restart" });
+  await act({ action: "placement-restart" });
 }
 
 const directStart = progressModule.createFreshProgress();
@@ -129,10 +132,10 @@ assert.match(app.innerHTML, /href="#\/placement">Choose a learning goal/);
 assert.match(navigate("#/learn"), /Continue: Court orientation/);
 assert.match(app.innerHTML, /href="#\/placement">Choose a learning goal/);
 assert.match(navigate("#/placement"), /I’m preparing for my first game/);
-act({ action: "set-entry", entry: "first-game-essentials" });
-assert.equal(directStart.entryRouteId, "first-game-essentials");
-assert.equal(directStart.activePlaylistId, "first-game-essentials");
-assert.deepEqual([...directStart.lessonProgress["court-orientation"].requiredPages], ["why-court"]);
+await act({ action: "set-entry", entry: "first-game-essentials" });
+assert.equal(t.getProgress().entryRouteId, "first-game-essentials");
+assert.equal(t.getProgress().activePlaylistId, "first-game-essentials");
+assert.deepEqual([...t.getProgress().lessonProgress["court-orientation"].requiredPages], ["why-court"]);
 navigate("#/lesson/court-orientation");
 assert.match(app.innerHTML, /data-lesson-heading>Name the lines/);
 
@@ -165,7 +168,7 @@ progressModule.recordPage(returning, orientation.id, firstPage.id);
 progressModule.recordAttempt(returning, orientation.id, "court-recall-check", false);
 t.setProgress(returning);
 navigate(`${refreshPath}&topic=kitchen-guide`);
-const storedBeforeReview = store.get(progressModule.STORE_KEY);
+const storedBeforeReview = store.get(progressStoreModule.coordinatedKey(progressModule.STORE_KEY));
 const feedback = { textContent: "" };
 const choices = ["0", "1", "2"].map((index) => ({
   dataset: { action: "refresher-answer", index },
@@ -179,8 +182,8 @@ assert.match(feedback.textContent, /^Try again\. Volley momentum/);
 answer(choices[1]);
 assert.match(feedback.textContent, /^Correct\. Volley momentum/);
 assert.deepEqual(choices.map((option) => option["aria-pressed"]), ["false", "true", "false"]);
-assert.equal(store.get(progressModule.STORE_KEY), storedBeforeReview, "Refresher answers must leave local progress untouched");
-assert.equal(JSON.stringify(returning), storedBeforeReview, "Refresher answers must also leave in-memory progress untouched");
+assert.equal(store.get(progressStoreModule.coordinatedKey(progressModule.STORE_KEY)), storedBeforeReview, "Refresher answers must leave local progress untouched");
+assert.deepEqual(JSON.parse(JSON.stringify(returning)), JSON.parse(storedBeforeReview).progress, "Refresher answers must also leave in-memory progress untouched");
 assert.match(navigate("#/"), /href="#\/lesson\/court-orientation">Resume lesson/);
 assert.match(navigate("#/lesson/court-orientation"), /data-lesson-heading>Name the lines/);
 progressModule.getLessonProgress(returning, orientation.id).conceptUnderstood = true;

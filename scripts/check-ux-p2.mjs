@@ -4,6 +4,7 @@ import vm from "node:vm";
 import * as scoring from "../content/scoring-walkthrough.js";
 import * as curriculum from "../content/curriculum.js";
 import * as routing from "../routing/simple-router.js";
+import * as progressStoreModule from "../content/progress-store.js";
 import * as storage from "../content/progress.js";
 
 const code = (await readFile(new URL("../app.js", import.meta.url), "utf8"))
@@ -20,12 +21,12 @@ const normalBefore = local.get(storage.STORE_KEY);
 
 function start(search, hash = "#/learn") {
   const app = { innerHTML: "" };
-  const window = { location: { search, hash }, localStorage, sessionStorage, addEventListener() {}, history: { replaceState(_state, _title, url) { window.location.hash = url; } } };
+  const window = { navigator: { locks: { request: (_name, _options, callback) => Promise.resolve().then(callback) } }, location: { search, hash }, localStorage, sessionStorage, addEventListener() {}, history: { replaceState(_state, _title, url) { window.location.hash = url; } } };
   globalThis.window = window;
-  const context = { ...curriculum, ...storage, ...routing, ...scoring, URLSearchParams, console, setTimeout, clearTimeout, window, document: { querySelector: (selector) => selector === "#app" ? app : null, addEventListener() {}, title: "" }, requestAnimationFrame() {} };
+  const context = { ...curriculum, ...storage, ...progressStoreModule, ...routing, ...scoring, URLSearchParams, console, setTimeout, clearTimeout, window, document: { querySelector: (selector) => selector === "#app" ? app : null, addEventListener() {}, title: "" }, requestAnimationFrame() {} };
   vm.createContext(context);
-  vm.runInContext(code + `\nglobalThis.test = { render, handleAction, rememberUnit, situations, getProgress: () => progress };`, context);
-  return { app, window, ...context.test, act(dataset) { context.test.handleAction({ target: { closest: () => ({ dataset }) } }); } };
+  vm.runInContext(code + `\nglobalThis.test = { render, handleAction, rememberUnit, situations, getProgress: () => progress, seedProgress: (value) => { progress = value; progressGeneration = 0; sessionOnly = false; window.localStorage.setItem(progressStore.recordKey, JSON.stringify({ schema: 1, generation: 0, progress: value, legacyRaw: window.localStorage.getItem(currentProgressKey), recovery: [] })); } };`, context);
+  return { app, window, ...context.test, act(dataset) { return context.test.handleAction({ target: { closest: () => ({ dataset }) } }); } };
 }
 
 assert.equal(storage.studyCondition("?study=atlas"), "atlas");
@@ -49,7 +50,7 @@ for (const situation of discovery.situations) {
   for (const id of situation.lessons) assert.ok(discovery.app.innerHTML.includes(`#/lesson/${id}`), `${situation.id} is missing ${id}`);
   assert.match(discovery.app.innerHTML, /not your rating/);
 }
-discovery.act({ action: "library-clear" });
+await discovery.act({ action: "library-clear" });
 assert.equal(discovery.window.location.hash, "#/library?view=skills");
 assert.match(discovery.app.innerHTML, /29 results/);
 discovery.window.location.hash = "#/lesson/drop-reset";
@@ -59,7 +60,8 @@ discovery.window.location.hash = "#/learn";
 const saved = discovery.getProgress();
 storage.recordPage(saved, "court-orientation", "why-court");
 storage.recordAttempt(saved, "court-orientation", "sample", true);
-discovery.act({ action: "study-entry", entry: "first-game-essentials" });
+discovery.seedProgress(saved);
+await discovery.act({ action: "study-entry", entry: "first-game-essentials" });
 assert.equal(discovery.window.location.hash, "#/placement");
 discovery.render();
 assert.match(discovery.app.innerHTML, /First Game Essentials/);
@@ -67,22 +69,22 @@ assert.deepEqual([...saved.lessonProgress["court-orientation"].requiredPages], [
 assert.equal(saved.lessonProgress["court-orientation"].attempts.sample.count, 1);
 for (const value of [0, 1, 2]) {
   discovery.window.location.hash = "#/learn";
-  discovery.act({ action: "study-entry", entry: "consistency" });
+  await discovery.act({ action: "study-entry", entry: "consistency" });
   for (const [index, id] of ["serve", "rally", "score", "control", "pressure"].entries()) {
     discovery.render();
     assert.match(discovery.app.innerHTML, new RegExp(`Consistency check · ${index + 1} of 5`));
-    discovery.act({ action: "diagnostic-answer", question: id, value: String(value) });
+    await discovery.act({ action: "diagnostic-answer", question: id, value: String(value) });
   }
   assert.match(discovery.app.innerHTML, /Your starting view/);
-  assert.equal(saved.placementAnswers.recommendedUnit, value === 2 ? 6 : 4);
+  assert.equal(discovery.getProgress().placementAnswers.recommendedUnit, value === 2 ? 6 : 4);
   assert.match(discovery.app.innerHTML, new RegExp(`points to Unit ${value === 2 ? 6 : 4}`));
 }
 assert.equal(local.get(storage.STORE_KEY), normalBefore);
-assert.ok(local.has(storage.progressKey("discovery")));
-assert.deepEqual(storage.loadProgress(ids, storage.progressKey("discovery")).lessonProgress["court-orientation"].requiredPages, ["why-court"]);
+assert.ok(local.has(progressStoreModule.coordinatedKey(storage.progressKey("discovery"))));
+assert.deepEqual(JSON.parse(local.get(progressStoreModule.coordinatedKey(storage.progressKey("discovery")))).progress.lessonProgress["court-orientation"].requiredPages, ["why-court"]);
 discovery.rememberUnit("unit-1", true);
 discovery.window.location.hash = "#/progress";
-discovery.act({ action: "reset-confirm" });
+await discovery.act({ action: "reset-confirm" });
 assert.equal(local.get(storage.STORE_KEY), normalBefore);
 assert.equal(local.get(storage.progressKey("baseline")), baselineBefore);
 assert.equal(session.has("learn-pickleball:study:discovery:unit-disclosures"), false);

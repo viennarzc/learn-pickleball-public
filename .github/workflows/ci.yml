@@ -26,3 +26,5 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Run checks
         run: npm run check
+      - name: Run browser journeys
+        run: npm run test:ui

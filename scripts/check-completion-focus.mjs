@@ -4,6 +4,7 @@ import vm from "node:vm";
 import * as scoring from "../content/scoring-walkthrough.js";
 import * as curriculum from "../content/curriculum.js";
 import * as routing from "../routing/simple-router.js";
+import * as progressStoreModule from "../content/progress-store.js";
 import * as progressModule from "../content/progress.js";
 
 const source = (await readFile(new URL("../app.js", import.meta.url), "utf8"))
@@ -13,6 +14,7 @@ const session = new Map();
 const listeners = {};
 const app = { innerHTML: "" };
 const window = {
+  navigator: { locks: { request: (_name, _options, callback) => Promise.resolve().then(callback) } },
   location: { hash: "#/", search: "?study=discovery" },
   localStorage: { getItem: (k) => local.get(k) ?? null, setItem: (k, v) => local.set(k, v), removeItem: (k) => local.delete(k) },
   sessionStorage: { getItem: (k) => session.get(k) ?? null, setItem: (k, v) => session.set(k, v), removeItem: (k) => session.delete(k) },
@@ -23,7 +25,7 @@ globalThis.window = window;
 let focused = null;
 const focusable = (id, dataset = {}) => ({ dataset, focus: () => { focused = id; } });
 const context = {
-  ...curriculum, ...progressModule, ...routing, ...scoring, URLSearchParams, console, setTimeout, clearTimeout, window,
+  ...curriculum, ...progressModule, ...progressStoreModule, ...routing, ...scoring, URLSearchParams, console, setTimeout, clearTimeout, window,
   document: {
     title: "",
     addEventListener: (type, fn) => { listeners[type] = fn; },
@@ -47,7 +49,7 @@ const context = {
   requestAnimationFrame: (callback) => callback(),
 };
 vm.createContext(context);
-vm.runInContext(source + `\nglobalThis.test = { render, handleAction, setProgress: (value) => progress = value, getProgress: () => progress };`, context);
+vm.runInContext(source + `\nglobalThis.test = { render, handleAction, setProgress: (value) => { progress = value; progressGeneration = 0; sessionOnly = false; window.localStorage.setItem(progressStore.recordKey, JSON.stringify({ schema: 1, generation: 0, progress: value, legacyRaw: window.localStorage.getItem(currentProgressKey), recovery: [] })); }, getProgress: () => progress };`, context);
 const t = context.test;
 const act = (dataset) => t.handleAction({ target: { closest: () => ({ dataset }) } });
 const ids = new Set(curriculum.getAllLessons().map((lesson) => lesson.id));
@@ -63,14 +65,14 @@ const reading = curriculum.getLesson("equipment-safety");
 const readingLast = reading.pages.filter((page) => page.required !== false).at(-1);
 for (const explicit of [false, true]) {
   const state = prepare(reading, readingLast, explicit);
-  act({ action: "page-complete", lesson: reading.id, page: readingLast.id });
+  await act({ action: "page-complete", lesson: reading.id, page: readingLast.id });
   assert.equal(window.location.hash, `#/lesson/${reading.id}?page=${readingLast.id}`);
   assert.equal(window.location.search, "?study=discovery");
   assert.ok(app.innerHTML.includes(`data-lesson-heading>${readingLast.title}`));
   assert.match(app.innerHTML, /Next: /, "optional content remains reachable");
   assert.equal(focused, '.lesson-footer [data-cta-priority="primary"]');
-  assert.equal(state.lessonProgress[reading.id].conceptUnderstood, true);
-  assert.equal(progressModule.loadProgress(ids, progressModule.progressKey("discovery")).lessonProgress[reading.id].conceptUnderstood, true);
+  assert.equal(t.getProgress().lessonProgress[reading.id].conceptUnderstood, true);
+  assert.equal(JSON.parse(local.get(progressStoreModule.coordinatedKey(progressModule.progressKey("discovery")))).progress.lessonProgress[reading.id].conceptUnderstood, true);
   window.location.hash = `#/lesson/${reading.id}`;
   t.render();
   assert.ok(app.innerHTML.includes(`data-lesson-heading>${reading.pages[0].title}`), "review opens the first page");
@@ -80,27 +82,28 @@ const finalLesson = curriculum.getLesson("ready-position");
 const finalPage = finalLesson.pages.at(-1);
 const finalState = prepare(finalLesson, finalPage, false);
 progressModule.getLessonProgress(finalState, "equipment-safety").conceptUnderstood = true;
-act({ action: "page-complete", lesson: finalLesson.id, page: finalPage.id });
+t.setProgress(finalState);
+await act({ action: "page-complete", lesson: finalLesson.id, page: finalPage.id });
 assert.equal(window.location.hash, `#/lesson/${finalLesson.id}?page=${finalPage.id}`);
 assert.match(app.innerHTML, /Next lesson: |See progress/);
 assert.equal(focused, '[data-action="sticker-dismiss"]');
-act({ action: "sticker-dismiss" });
+await act({ action: "sticker-dismiss" });
 assert.equal(focused, '.lesson-footer [data-cta-priority="primary"]');
 
 const answerLesson = curriculum.getLesson("court-orientation");
 const answerPage = answerLesson.pages.find((page) => page.id === "court-recall");
 for (const explicit of [false, true]) {
   const state = prepare(answerLesson, answerPage, explicit);
-  act({ action: "page-answer", lesson: answerLesson.id, page: answerPage.id, index: "0" });
-  assert.equal(state.lessonProgress[answerLesson.id].conceptUnderstood, false);
-  act({ action: "page-answer", lesson: answerLesson.id, page: answerPage.id, index: "1" });
+  await act({ action: "page-answer", lesson: answerLesson.id, page: answerPage.id, index: "0" });
+  assert.equal(t.getProgress().lessonProgress[answerLesson.id].conceptUnderstood, false);
+  await act({ action: "page-answer", lesson: answerLesson.id, page: answerPage.id, index: "1" });
   assert.equal(window.location.hash, `#/lesson/${answerLesson.id}?page=${answerPage.id}`);
   assert.equal(focused, '[data-action="sticker-dismiss"]');
   assert.match(app.innerHTML, /Next: /);
-  act({ action: "sticker-dismiss" });
+  await act({ action: "sticker-dismiss" });
   assert.equal(focused, ".lesson-page .feedback");
-  assert.equal(state.lessonProgress[answerLesson.id].conceptUnderstood, true);
-  assert.equal(progressModule.loadProgress(ids, progressModule.progressKey("discovery")).lessonProgress[answerLesson.id].attempts[answerPage.activity.id].count, 2);
+  assert.equal(t.getProgress().lessonProgress[answerLesson.id].conceptUnderstood, true);
+  assert.equal(JSON.parse(local.get(progressStoreModule.coordinatedKey(progressModule.progressKey("discovery")))).progress.lessonProgress[answerLesson.id].attempts[answerPage.activity.id].count, 2);
 }
 
 const courtState = progressModule.createFreshProgress();
@@ -110,16 +113,16 @@ t.render();
 for (const [zone, category, key] of [["top-kitchen", "kitchen", "Enter"], ["top-left-service", "service", " "], ["top-baseline", "baseline", "Enter"]]) {
   let prevented = false;
   const target = { dataset: { action: "court-zone", zone, category }, closest: () => target };
-  listeners.keydown({ target, key, preventDefault: () => { prevented = true; } });
+  await listeners.keydown({ target, key, preventDefault: () => { prevented = true; } });
   assert.equal(prevented, true);
   assert.equal(focused, zone, `${zone} remains focused`);
-  assert.ok(courtState.courtVisited.includes(category));
+  assert.ok(t.getProgress().courtVisited.includes(category));
 }
-act({ action: "court-zone", zone: "bottom-kitchen", category: "kitchen" });
+await act({ action: "court-zone", zone: "bottom-kitchen", category: "kitchen" });
 assert.equal(focused, "bottom-kitchen", "mouse activation restores focus too");
-act({ action: "court-mode", mode: "check" });
+await act({ action: "court-mode", mode: "check" });
 assert.match(app.innerHTML, /Where does this serve land/);
-act({ action: "court-check-answer", answer: "right" });
-assert.equal(courtState.courtExplored, true);
+await act({ action: "court-check-answer", answer: "right" });
+assert.equal(t.getProgress().courtExplored, true);
 assert.equal(focused, '[data-action="sticker-dismiss"]');
 console.log("Completion and Court Lab focus checks passed.");
