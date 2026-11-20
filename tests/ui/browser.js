@@ -59,12 +59,17 @@ export async function launchBrowser({ executablePath = findChrome(), timeout = 1
     async close() {
       // Wait for the process to exit before deleting its profile folder;
       // Chrome keeps writing to it while shutting down.
-      const exited = child.exitCode !== null ? Promise.resolve() : new Promise((done) => child.once("exit", done));
+      const exited = child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : new Promise((done) => child.once("exit", done));
       await cdp.send("Browser.close").catch(() => {});
       cdp.close();
       const forced = setTimeout(() => child.kill("SIGKILL"), 5_000);
-      await exited;
-      clearTimeout(forced);
+      let deadline;
+      try {
+        await Promise.race([exited, new Promise((_done, fail) => { deadline = setTimeout(() => fail(new Error("Browser did not exit")), 10_000); })]);
+      } finally {
+        clearTimeout(forced);
+        clearTimeout(deadline);
+      }
       rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     },
   };
