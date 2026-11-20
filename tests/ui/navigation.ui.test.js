@@ -248,7 +248,8 @@ for (const viewport of [
             const y = (b.top + b.height / 2 - court.top) / court.height;
             return { team: ball.dataset.servingTeam, side: ball.dataset.servingSide,
               playerTeam: player.dataset.team, playerSide: player.dataset.side,
-              startX, x, y, animated: !!animation, width: document.documentElement.scrollWidth };
+              startX, x, y, animated: !!animation, width: document.documentElement.scrollWidth,
+              clientWidth: document.documentElement.clientWidth, viewportWidth: window.innerWidth };
           })()`);
           assert.equal(actual.team, actual.playerTeam);
           assert.equal(actual.side, actual.playerSide);
@@ -257,7 +258,8 @@ for (const viewport of [
           assert.ok(leftColumn ? actual.x > .5 && actual.x < 1 : actual.x > 0 && actual.x < .5);
           assert.ok(actual.team === "blue" ? actual.y > 0 && actual.y < .34 : actual.y > .66 && actual.y < 1);
           assert.equal(actual.animated, !viewport.reducedMotion);
-          assert.equal(actual.width, viewport.width);
+          assert.equal(actual.viewportWidth, viewport.width);
+          assert.equal(actual.width, actual.clientWidth, "content must not overflow the viewport horizontally");
         }
         await page.click(scoringControl("next"));
         assert.equal(await page.evaluate(`!!document.querySelector('${walkDiagram} .scoring-serve-ball')`), false);

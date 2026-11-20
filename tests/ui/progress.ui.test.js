@@ -34,14 +34,24 @@ async function holdLock(page) {
   })`);
 }
 
+async function waitForPending(page, count) {
+  await page.waitFor(`navigator.locks.query().then(({ pending }) => pending.filter((lock) => lock.name === ${JSON.stringify(`${NEW_KEY}:lock`)}).length >= ${count})`, { timeout: 10000 });
+}
+
 it("keeps overlapping updates from two real tabs and does not save during navigation", async () => {
   const { first, second } = await openPair("#/lesson/court-orientation?page=why-court", "#/lesson/court-orientation?page=name-lines");
   try {
     await holdLock(first);
     await first.evaluate('document.querySelector(\'[data-action="page-complete"]\').click()');
     await second.evaluate('document.querySelector(\'[data-action="page-complete"]\').click()');
+    await waitForPending(first, 2);
     await first.evaluate("window.releaseProgressLock() ");
-    await first.waitFor(`${hasPage("why-court")} && ${hasPage("name-lines")}`);
+    try {
+      await first.waitFor(`${hasPage("why-court")} && ${hasPage("name-lines")}`);
+    } catch (error) {
+      const state = await Promise.all([first, second].map((page) => page.evaluate(`({ saved: ${saved}, url: location.href, notice: document.querySelector("#storage-notice").textContent })`)));
+      throw new Error(`${error.message}; tab states: ${JSON.stringify(state)}`);
+    }
     await second.waitFor(`${hasPage("why-court")} && ${hasPage("name-lines")}`);
     const before = await first.evaluate(`localStorage.getItem(${JSON.stringify(NEW_KEY)})`);
     await second.evaluate('location.hash = "#/practice"');
@@ -53,6 +63,7 @@ it("keeps overlapping updates from two real tabs and does not save during naviga
     await holdLock(first);
     await first.evaluate('document.querySelector(\'[data-action="page-answer"][data-index="0"]\').click()');
     await second.evaluate('document.querySelector(\'[data-action="page-answer"][data-index="1"]\').click()');
+    await waitForPending(first, 2);
     await first.evaluate("window.releaseProgressLock()");
     await first.waitFor(`${saved}?.progress.lessonProgress["court-orientation"]?.attempts["court-recall-check"]?.count === 2`);
     assert.deepEqual((await first.evaluate(saved)).progress.lessonProgress["court-orientation"].attempts["court-recall-check"], { count: 2, correct: true });
@@ -73,6 +84,7 @@ it("rejects a stale action queued behind a reset", async () => {
     await holdLock(first);
     await first.evaluate('document.querySelector(\'[data-action="reset-confirm"]\').click()');
     await second.evaluate('document.querySelector(\'[data-action="page-complete"]\').click()');
+    await waitForPending(first, 2);
     await first.evaluate("window.releaseProgressLock()");
     await first.waitFor(`${saved}?.generation === 1`);
     await second.waitFor('!document.querySelector("#storage-notice").hidden');
