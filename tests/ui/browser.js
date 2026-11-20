@@ -80,17 +80,30 @@ async function connect(endpoint) {
   socket.onmessage = ({ data }) => {
     const message = JSON.parse(data);
     if (message.id !== undefined) {
-      const { resolve, reject } = pending.get(message.id);
+      const entry = pending.get(message.id);
+      if (!entry) return; // The command may already have timed out.
+      const { resolve, reject } = entry;
       pending.delete(message.id);
       if (message.error) reject(new Error(`${message.error.message}`));
       else resolve(message.result);
     } else for (const listener of listeners) listener(message);
   };
+  socket.onclose = () => {
+    for (const { reject } of pending.values()) reject(new Error("Browser connection closed"));
+    pending.clear();
+  };
   return {
     send(method, params = {}, sessionId) {
       const id = ++nextId;
-      socket.send(JSON.stringify({ id, method, params, sessionId }));
-      return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => { pending.delete(id); reject(new Error(`Browser command timed out: ${method}`)); }, 15000);
+        pending.set(id, {
+          resolve: (value) => { clearTimeout(timeout); resolve(value); },
+          reject: (error) => { clearTimeout(timeout); reject(error); },
+        });
+        try { socket.send(JSON.stringify({ id, method, params, sessionId })); }
+        catch (error) { clearTimeout(timeout); pending.delete(id); reject(error); }
+      });
     },
     on: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
     close: () => socket.close(),
@@ -145,13 +158,16 @@ async function openPage(cdp, { width = 1280, height = 800, mobile = false, reduc
     evaluate,
     newSibling: (options = {}) => openPage(cdp, { ...options, browserContextId }),
     async goto(url) {
-      const loaded = new Promise((done) => {
+      let stopWaiting;
+      const loaded = new Promise((done, fail) => {
+        const timeout = setTimeout(() => { stopWaiting(); fail(new Error(`Timed out loading ${url}`)); }, 15000);
         const off = cdp.on((message) => {
-          if (message.sessionId === sessionId && message.method === "Page.loadEventFired") { off(); done(); }
+          if (message.sessionId === sessionId && message.method === "Page.loadEventFired") { stopWaiting(); done(); }
         });
+        stopWaiting = () => { clearTimeout(timeout); off(); };
       });
-      await send("Page.navigate", { url });
-      await loaded;
+      try { await Promise.all([send("Page.navigate", { url }), loaded]); }
+      finally { stopWaiting(); }
     },
     // Polls a JS expression until it is truthy.
     async waitFor(expression, { timeout = 5_000, interval = 25 } = {}) {
