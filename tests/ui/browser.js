@@ -33,7 +33,7 @@ function playwrightChromium(dir) {
     .map((name) => join(dir, name, "chrome-linux", "chrome"));
 }
 
-export async function launchBrowser({ executablePath = findChrome(), timeout = 10_000 } = {}) {
+export async function launchBrowser({ executablePath = findChrome(), timeout = 30_000 } = {}) {
   if (!executablePath) throw new Error("Chrome/Chromium not found. Install it or set CHROME_PATH.");
   const profile = mkdtempSync(join(tmpdir(), "ui-tests-"));
   const child = spawn(executablePath, [
@@ -42,18 +42,34 @@ export async function launchBrowser({ executablePath = findChrome(), timeout = 1
     "--disable-background-networking", "--disable-extensions", "about:blank",
   ], { stdio: ["ignore", "ignore", "pipe"] });
 
-  const endpoint = await new Promise((done, fail) => {
-    let log = "";
-    const timer = setTimeout(() => fail(new Error(`Browser did not start:\n${log}`)), timeout);
-    child.stderr.on("data", (chunk) => {
-      log += chunk;
-      const found = log.match(/DevTools listening on (ws:\/\/\S+)/);
-      if (found) { clearTimeout(timer); done(found[1]); }
+  let cdp;
+  try {
+    const endpoint = await new Promise((done, fail) => {
+      let log = "";
+      let started = false;
+      const timer = setTimeout(() => fail(new Error(`Browser did not start:\n${log}`)), timeout);
+      child.stderr.on("data", (chunk) => {
+        if (started) return; // Keep draining stderr without accumulating it.
+        log += chunk;
+        const found = log.match(/DevTools listening on (ws:\/\/\S+)/);
+        if (found) { started = true; clearTimeout(timer); done(found[1]); }
+      });
+      child.once("error", (error) => { clearTimeout(timer); fail(error); });
+      child.once("exit", (code) => { clearTimeout(timer); fail(new Error(`Browser exited (${code}):\n${log}`)); });
     });
-    child.on("exit", (code) => { clearTimeout(timer); fail(new Error(`Browser exited (${code}):\n${log}`)); });
-  });
+    cdp = await connect(endpoint);
+  } catch (error) {
+    const exited = child.exitCode !== null || child.signalCode !== null || !child.pid
+      ? Promise.resolve()
+      : new Promise((done) => child.once("exit", done));
+    child.kill("SIGKILL");
+    let deadline;
+    try { await Promise.race([exited, new Promise((done) => { deadline = setTimeout(done, 5000); })]); }
+    finally { clearTimeout(deadline); }
+    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    throw error;
+  }
 
-  const cdp = await connect(endpoint);
   return {
     newPage: (viewport) => openPage(cdp, viewport),
     async close() {
