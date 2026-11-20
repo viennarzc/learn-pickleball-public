@@ -97,9 +97,10 @@ async function connect(endpoint) {
   };
 }
 
-// A page in its own browser context, so storage starts empty for every page.
-async function openPage(cdp, { width = 1280, height = 800, mobile = false, reducedMotion = false } = {}) {
-  const { browserContextId } = await cdp.send("Target.createBrowserContext");
+// Pages normally get isolated storage; sibling pages deliberately share it.
+async function openPage(cdp, { width = 1280, height = 800, mobile = false, reducedMotion = false, browserContextId: existingContext, initScript } = {}) {
+  const ownsContext = !existingContext;
+  const browserContextId = existingContext || (await cdp.send("Target.createBrowserContext")).browserContextId;
   const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank", browserContextId });
   const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
   const send = (method, params) => cdp.send(method, params, sessionId);
@@ -110,6 +111,7 @@ async function openPage(cdp, { width = 1280, height = 800, mobile = false, reduc
     if (message.method === "Log.entryAdded" && message.params.entry.level === "error") errors.push(message.params.entry.text);
   });
   await Promise.all([send("Page.enable"), send("Runtime.enable"), send("Log.enable")]);
+  if (initScript) await send("Page.addScriptToEvaluateOnNewDocument", { source: initScript });
   await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: mobile ? 3 : 1, mobile });
   if (reducedMotion) await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   if (mobile) await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
@@ -141,6 +143,7 @@ async function openPage(cdp, { width = 1280, height = 800, mobile = false, reduc
   return {
     errors,
     evaluate,
+    newSibling: (options = {}) => openPage(cdp, { ...options, browserContextId }),
     async goto(url) {
       const loaded = new Promise((done) => {
         const off = cdp.on((message) => {
@@ -174,7 +177,8 @@ async function openPage(cdp, { width = 1280, height = 800, mobile = false, reduc
     },
     async close() {
       stop();
-      await cdp.send("Target.disposeBrowserContext", { browserContextId }).catch(() => {});
+      if (ownsContext) await cdp.send("Target.disposeBrowserContext", { browserContextId }).catch(() => {});
+      else await cdp.send("Target.closeTarget", { targetId }).catch(() => {});
     },
   };
 }

@@ -116,6 +116,11 @@ const scoringState = `({
   side: document.querySelector(".scoring-player.is-serving")?.dataset.side,
 })`;
 
+async function expectScoringState(page, expected) {
+  await page.waitFor(`JSON.stringify(${scoringState}) === ${JSON.stringify(JSON.stringify(expected))}`);
+  assert.deepEqual(await page.evaluate(scoringState), expected);
+}
+
 it("opens the ungated doubles walkthrough from Library and reveals the next server", async () => {
   const page = await browser.newPage();
   try {
@@ -134,14 +139,15 @@ it("opens the ungated doubles walkthrough from Library and reveals the next serv
       [[1, 1, 2], "Sam", "right"],
     ]) {
       await page.click(scoringControl("next"));
-      assert.deepEqual(await page.evaluate(scoringState), { call, server, side });
+      await expectScoringState(page, { call, server, side });
     }
     await page.click(scoringControl("next"));
+    await page.waitFor('!document.querySelector("[data-scoring-choices]").hidden');
     assert.equal(await page.evaluate('document.querySelector("[data-scoring-count]").textContent'), "Step 6 of 6");
     assert.equal(await page.evaluate('document.querySelector("[data-scoring-choices]").hidden'), false);
     assert.deepEqual(await page.evaluate(scoringState), { call: [1, 1, 2], server: "Sam", side: "right" });
     await page.click('[data-scoring-answer="1"]');
-    assert.deepEqual(await page.evaluate(scoringState), { call: [1, 1, 1], server: "Jo", side: "right" });
+    await expectScoringState(page, { call: [1, 1, 1], server: "Jo", side: "right" });
     assert.equal(await page.evaluate('document.querySelector("[data-scoring-feedback]").textContent'), "Correct.");
     assert.equal(await page.evaluate('document.querySelector(".scoring-track").style.getPropertyValue("--scoring-progress")'), "100%");
     assert.deepEqual(page.errors, []);
@@ -151,7 +157,28 @@ it("opens the ungated doubles walkthrough from Library and reveals the next serv
 });
 
 it("opens from Keep Score on mobile and stops singles autoplay at the prediction", async () => {
-  const page = await browser.newPage({ width: 390, height: 844, mobile: true });
+  // Control only the walkthrough's 4.8-second timer so the test cannot race a
+  // delayed browser or CI worker while it pauses and restarts autoplay.
+  const initScript = `(() => {
+    const schedule = window.setTimeout.bind(window);
+    const cancel = window.clearTimeout.bind(window);
+    const pending = new Map();
+    let nextId = 1000000;
+    window.setTimeout = (callback, delay, ...args) => {
+      if (delay !== 4800) return schedule(callback, delay, ...args);
+      const id = nextId++;
+      pending.set(id, () => callback(...args));
+      return id;
+    };
+    window.clearTimeout = (id) => { if (pending.has(id)) pending.delete(id); else cancel(id); };
+    window.advanceScoringTimer = () => {
+      const [id, callback] = pending.entries().next().value || [];
+      if (!callback) throw new Error("No scoring timer is pending");
+      pending.delete(id);
+      callback();
+    };
+  })()`;
+  const page = await browser.newPage({ width: 390, height: 844, mobile: true, initScript });
   try {
     await page.goto(`${server.url}/#/learn`);
     await page.waitFor('document.querySelector("main")?.dataset.view === "learn"');
@@ -162,17 +189,25 @@ it("opens from Keep Score on mobile and stops singles autoplay at the prediction
     await page.waitFor('document.querySelector("main")?.dataset.view === "scoring"');
     await page.tap('[data-scoring-format="singles"]');
     await page.tap(scoringControl("auto"));
+    await page.waitFor(`document.querySelector('${scoringControl("auto")}').textContent === "Pause autoplay"`);
+    await page.evaluate("window.advanceScoringTimer()");
     await page.waitFor('document.querySelector("[data-scoring-count]").textContent === "Step 2 of 6"', { timeout: 8000 });
     assert.deepEqual(await page.evaluate(scoringState), { call: [1, 0], server: "Mira", side: "left" });
     await page.tap(scoringControl("auto"));
+    await page.waitFor(`document.querySelector('${scoringControl("auto")}').textContent === "Autoplay"`);
     assert.equal(await page.evaluate(`document.querySelector('${scoringControl("auto")}').textContent`), "Autoplay");
-    for (let rally = 0; rally < 3; rally += 1) await page.tap(scoringControl("next"));
+    for (let rally = 0; rally < 3; rally += 1) {
+      await page.tap(scoringControl("next"));
+      await page.waitFor(`document.querySelector("[data-scoring-count]").textContent === "Step ${rally + 3} of 6"`);
+    }
     assert.deepEqual(await page.evaluate(scoringState), { call: [2, 1], server: "Leo", side: "right" });
     await page.tap(scoringControl("auto"));
+    await page.waitFor(`document.querySelector('${scoringControl("auto")}').textContent === "Pause autoplay"`);
+    await page.evaluate("window.advanceScoringTimer()");
     await page.waitFor('!document.querySelector("[data-scoring-choices]").hidden', { timeout: 8000 });
     assert.equal(await page.evaluate(`document.querySelector('${scoringControl("auto")}').hidden`), true);
     await page.tap('[data-scoring-answer="0"]');
-    assert.deepEqual(await page.evaluate(scoringState), { call: [1, 2], server: "Mira", side: "left" });
+    await expectScoringState(page, { call: [1, 2], server: "Mira", side: "left" });
     assert.match(await page.evaluate('document.querySelector("[data-scoring-feedback]").textContent'), /You chose Mira, from the right/);
     assert.equal(await page.evaluate("document.documentElement.scrollWidth"), 390);
     assert.deepEqual(page.errors, []);
