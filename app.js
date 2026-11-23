@@ -90,6 +90,7 @@ let progressGeneration = initialProgress.generation ?? 0;
 let sessionOnly = false;
 let progressQueue = Promise.resolve();
 let legacyConflict = null;
+let pendingResetConflict = false;
 let courtMode = "explore";
 let activeCourtZone = null;
 let courtFeedback = null;
@@ -146,6 +147,7 @@ function progressSummary(value) {
 }
 
 function showStorageNotice(status, details = {}) {
+  if (status === "reset-conflict") pendingResetConflict = true;
   const notice = document.querySelector("#storage-notice");
   if (!notice) return;
   const message = notice.querySelector("[data-storage-message]");
@@ -167,8 +169,10 @@ function showStorageNotice(status, details = {}) {
   if (status === "legacy-changed" || status === "recovery-failed") legacyConflict = { generation: details.generation, legacyRaw: details.legacyRaw };
 }
 
-function clearStorageNotice() {
+function clearStorageNotice({ acknowledgeResetConflict = false } = {}) {
   legacyConflict = null;
+  if (acknowledgeResetConflict) pendingResetConflict = false;
+  if (pendingResetConflict) { showStorageNotice("reset-conflict"); return; }
   document.querySelector("#storage-notice")?.setAttribute("hidden", "");
 }
 
@@ -181,10 +185,12 @@ function enqueueProgressTask(task) {
 function changeProgress(change, { reset = false } = {}) {
   // Capture the generation when the learner acts, not when a queued task runs.
   const expectedGeneration = progressGeneration;
-  return enqueueProgressTask(() => applyProgressChange(change, reset, expectedGeneration));
+  // Earlier queued actions cannot acknowledge a warning shown after the click.
+  const acknowledgeResetConflict = pendingResetConflict;
+  return enqueueProgressTask(() => applyProgressChange(change, reset, expectedGeneration, acknowledgeResetConflict));
 }
 
-async function applyProgressChange(change, reset, expectedGeneration) {
+async function applyProgressChange(change, reset, expectedGeneration, acknowledgeResetConflict) {
   if (sessionOnly) {
     if (reset) { showStorageNotice("reset-failed"); return null; }
     return { value: change(progress), saved: false };
@@ -202,7 +208,7 @@ async function applyProgressChange(change, reset, expectedGeneration) {
       return null;
     }
     if (visible.status === "legacy-changed") showStorageNotice(visible.status, visible);
-    else if (visible.status === "ready") clearStorageNotice();
+    else if (visible.status === "ready") clearStorageNotice({ acknowledgeResetConflict });
     else showStorageNotice("unavailable");
     return { value: result.value, saved: true };
   }

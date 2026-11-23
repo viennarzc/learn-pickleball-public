@@ -126,10 +126,12 @@ it("opens the ungated doubles walkthrough from Library and reveals the next serv
   try {
     await page.goto(`${server.url}/#/library?view=rules`);
     await page.waitFor('document.querySelector("main")?.dataset.view === "library"');
+    await page.evaluate('document.documentElement.style.scrollBehavior = "auto"');
     await page.click("[data-scoring-link]");
     await page.waitFor('document.querySelector("main")?.dataset.view === "scoring"');
     await page.waitFor('!!document.querySelector(".scoring-court")');
-    await page.evaluate('document.documentElement.style.scrollBehavior = "auto"');
+    // Navigation focuses the title on the next animation frame and can scroll.
+    await page.waitFor('document.activeElement?.id === "scoring-title"');
 
     for (const [call, server, side] of [
       [[0, 0, 2], "Mira", "right"],
@@ -187,6 +189,7 @@ it("opens from Keep Score on mobile and stops singles autoplay at the prediction
     await page.tap(`${unit} > summary`);
     await page.tap(`${unit} [data-scoring-link]`);
     await page.waitFor('document.querySelector("main")?.dataset.view === "scoring"');
+    await page.waitFor('document.activeElement?.id === "scoring-title"');
     await page.tap('[data-scoring-format="singles"]');
     await page.tap(scoringControl("auto"));
     await page.waitFor(`document.querySelector('${scoringControl("auto")}').textContent === "Pause autoplay"`);

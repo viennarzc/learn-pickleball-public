@@ -18,9 +18,9 @@ before(async () => {
 });
 after(async () => { await browser?.close(); await server?.close(); });
 
-async function openPair(firstHash, secondHash) {
+async function openPair(firstHash, secondHash, secondOptions) {
   const first = await browser.newPage();
-  const second = await first.newSibling();
+  const second = await first.newSibling(secondOptions);
   await Promise.all([first.goto(`${server.url}/${firstHash}`), second.goto(`${server.url}/${secondHash}`)]);
   await Promise.all([first.waitFor('!!document.querySelector("main")'), second.waitFor('!!document.querySelector("main")')]);
   return { first, second };
@@ -111,6 +111,100 @@ it("rejects a stale action queued behind a reset", async () => {
     assert.deepEqual(record.progress.lessonProgress, {});
     assert.match(await second.evaluate('document.querySelector("#storage-notice").textContent'), /changed in another tab/);
   } finally { await second.close(); await first.close(); }
+});
+
+it("keeps the reset-conflict warning through delayed notifications until a retry succeeds", async () => {
+  // Delay only the app's reset storage event, so it arrives after the queued
+  // stale action has already been rejected and its warning has appeared.
+  const initScript = `(() => {
+    const add = window.addEventListener;
+    window.addEventListener = function(type, listener, options) {
+      if (type !== "storage") return add.call(this, type, listener, options);
+      return add.call(this, type, function(event) {
+        if (event.key === "learn-pickleball:v2:coordinated" && JSON.parse(event.newValue || "null")?.generation === 1) {
+          window.delayedResetEvent = () => listener.call(window, event);
+        } else listener.call(window, event);
+      }, options);
+    };
+  })()`;
+  const { first, second } = await openPair("#/lesson/court-orientation?page=why-court", "#/lesson/court-orientation?page=name-lines", { initScript });
+  try {
+    await first.evaluate('document.querySelector(\'[data-action="page-complete"]\').click()');
+    await first.waitFor(hasPage("why-court"));
+    await first.evaluate('location.hash = "#/progress"');
+    await first.waitFor('document.querySelector("main")?.dataset.view === "progress"');
+    await first.evaluate('document.querySelector(\'[data-action="reset-arm"]\').click()');
+    await first.waitFor('!!document.querySelector(\'[data-action="reset-confirm"]\')');
+    await holdLock(first);
+    await first.evaluate('document.querySelector(\'[data-action="reset-confirm"]\').click()');
+    await second.evaluate('document.querySelector(\'[data-action="page-complete"]\').click()');
+    await waitForPending(first);
+    await first.evaluate("window.releaseProgressLock()");
+    await second.waitFor('!document.querySelector("#storage-notice").hidden');
+    await second.waitFor('typeof window.delayedResetEvent === "function"');
+    assert.match(await second.evaluate('document.querySelector("#storage-notice").textContent'), /changed in another tab/);
+    assert.deepEqual((await second.evaluate(saved)).progress.lessonProgress, {});
+
+    await second.evaluate('window.delayedResetEvent(); window.dispatchEvent(new Event("pageshow"))');
+    assert.equal(await second.evaluate('document.querySelector("#storage-notice").hidden'), false);
+    assert.match(await second.evaluate('document.querySelector("#storage-notice").textContent'), /changed in another tab/);
+
+    // An older-tab conflict takes priority, then the reset warning reappears
+    // after the learner has resolved that separate conflict.
+    await first.evaluate(`localStorage.setItem("learn-pickleball:v2", JSON.stringify({ ...JSON.parse(localStorage.getItem("learn-pickleball:v2:coordinated")).progress, entryRouteId: "never-played" }))`);
+    await second.waitFor('!document.querySelector("[data-storage-recovery]").hidden');
+    await second.evaluate('document.querySelector(\'[data-action="legacy-keep"]\').click()');
+    await second.waitFor(`${saved}?.generation === 2 && !document.querySelector("#storage-notice").hidden && document.querySelector("#storage-notice").textContent.includes("changed in another tab")`);
+
+    await second.evaluate('document.querySelector(\'[data-action="page-complete"]\').click()');
+    await second.waitFor(`${hasPage("name-lines")} && document.querySelector("#storage-notice").hidden`);
+    assert.equal((await second.evaluate(saved)).generation, 2);
+  } finally {
+    await first.evaluate("window.releaseProgressLock?.()").catch(() => {});
+    await second.close();
+    await first.close();
+  }
+});
+
+it("does not dismiss the warning for an action queued before the warning appeared", async () => {
+  const { first, second } = await openPair("#/lesson/court-orientation?page=why-court", "#/lesson/court-orientation?page=name-lines");
+  try {
+    await second.evaluate(`window.sawResetEvent = false; window.addEventListener("storage", (event) => {
+      if (event.key === "learn-pickleball:v2:coordinated" && JSON.parse(event.newValue || "null")?.generation === 1) window.sawResetEvent = true;
+    })`);
+    await first.evaluate('document.querySelector(\'[data-action="page-complete"]\').click()');
+    await first.waitFor(hasPage("why-court"));
+    await first.evaluate('location.hash = "#/progress"');
+    await first.waitFor('document.querySelector("main")?.dataset.view === "progress"');
+    await first.evaluate('document.querySelector(\'[data-action="reset-arm"]\').click()');
+    await first.waitFor('!!document.querySelector(\'[data-action="reset-confirm"]\')');
+    await holdLock(first);
+    await first.evaluate('document.querySelector(\'[data-action="reset-confirm"]\').click()');
+    await first.waitFor('navigator.locks.query().then(({ pending }) => pending.some((lock) => lock.name === "learn-pickleball:v2:coordinated:lock"))');
+    await first.evaluate('void navigator.locks.request("learn-pickleball:v2:coordinated:lock", () => new Promise((release) => { window.releaseBetween = release; }))');
+    await second.evaluate('document.querySelector(\'[data-action="page-complete"]\').click()');
+    await first.waitFor('navigator.locks.query().then(({ pending }) => pending.filter((lock) => lock.name === "learn-pickleball:v2:coordinated:lock").length >= 3)');
+    await first.evaluate("window.releaseProgressLock()");
+    await first.waitFor('typeof window.releaseBetween === "function"');
+    await second.waitFor("window.sawResetEvent");
+
+    // This action captures the new generation, but was queued before the first
+    // action reported its conflict. Its success must not dismiss that notice.
+    await second.evaluate('document.querySelector(\'[data-action="page-complete"]\').click()');
+    await first.evaluate("window.releaseBetween()");
+    await second.waitFor(`${hasPage("name-lines")} && !!document.querySelector(".lesson-page .is-complete")`);
+    assert.equal(await second.evaluate('document.querySelector("#storage-notice").hidden'), false);
+    assert.match(await second.evaluate('document.querySelector("#storage-notice").textContent'), /changed in another tab/);
+
+    await second.evaluate('location.hash = "#/lesson/court-orientation?page=why-court"');
+    await second.waitFor('document.querySelector(\'[data-action="page-complete"]\')?.dataset.page === "why-court"');
+    await second.evaluate('document.querySelector(\'[data-action="page-complete"]\').click()');
+    await second.waitFor(`${hasPage("why-court")} && document.querySelector("#storage-notice").hidden`);
+  } finally {
+    await first.evaluate("window.releaseProgressLock?.(); window.releaseBetween?.()").catch(() => {});
+    await second.close();
+    await first.close();
+  }
 });
 
 it("stops for a changed older-tab copy and preserves both when the learner chooses", async () => {
