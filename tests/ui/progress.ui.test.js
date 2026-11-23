@@ -34,6 +34,10 @@ async function holdLock(page) {
   })`);
 }
 
+async function waitForFirstPending(page) {
+  await page.waitFor('navigator.locks.query().then(({ pending }) => pending.some((lock) => lock.name === "learn-pickleball:v2:coordinated:lock"))', { timeout: 10000 });
+}
+
 async function waitForPending(page, { timeout = 10000 } = {}) {
   await page.waitFor('navigator.locks.query().then(({ pending }) => pending.filter((lock) => lock.name === "learn-pickleball:v2:coordinated:lock").length >= 2)', { timeout });
 }
@@ -101,6 +105,7 @@ it("rejects a stale action queued behind a reset", async () => {
     await first.waitFor('!!document.querySelector(\'[data-action="reset-confirm"]\')');
     await holdLock(first);
     await first.evaluate('document.querySelector(\'[data-action="reset-confirm"]\').click()');
+    await waitForFirstPending(first);
     await second.evaluate('document.querySelector(\'[data-action="page-complete"]\').click()');
     await waitForPending(first);
     await first.evaluate("window.releaseProgressLock()");
@@ -137,6 +142,7 @@ it("keeps the reset-conflict warning through delayed notifications until a retry
     await first.waitFor('!!document.querySelector(\'[data-action="reset-confirm"]\')');
     await holdLock(first);
     await first.evaluate('document.querySelector(\'[data-action="reset-confirm"]\').click()');
+    await waitForFirstPending(first);
     await second.evaluate('document.querySelector(\'[data-action="page-complete"]\').click()');
     await waitForPending(first);
     await first.evaluate("window.releaseProgressLock()");
@@ -180,7 +186,7 @@ it("does not dismiss the warning for an action queued before the warning appeare
     await first.waitFor('!!document.querySelector(\'[data-action="reset-confirm"]\')');
     await holdLock(first);
     await first.evaluate('document.querySelector(\'[data-action="reset-confirm"]\').click()');
-    await first.waitFor('navigator.locks.query().then(({ pending }) => pending.some((lock) => lock.name === "learn-pickleball:v2:coordinated:lock"))');
+    await waitForFirstPending(first);
     await first.evaluate('void navigator.locks.request("learn-pickleball:v2:coordinated:lock", () => new Promise((release) => { window.releaseBetween = release; }))');
     await second.evaluate('document.querySelector(\'[data-action="page-complete"]\').click()');
     await first.waitFor('navigator.locks.query().then(({ pending }) => pending.filter((lock) => lock.name === "learn-pickleball:v2:coordinated:lock").length >= 3)');
