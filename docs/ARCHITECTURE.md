@@ -32,7 +32,7 @@ The diagram groups infrastructure responsibilities; it is not a claim about the 
 | Navigation routing | [routing/simple-router.js](../routing/simple-router.js) | The route table (`ROUTES`: path → view, nav tab, title, one comment per route), the navigation tabs (`NAV_ITEMS`), hash parsing, route matching with `:params`, and link building. It knows nothing about rendering or progress. |
 | Rendering, interactions | [app.js](../app.js) | Maps each router view name to a render function, renders HTML strings into `#app`, handles delegated actions, selects the next lesson, enforces gates, and awards keepsakes. UI and domain orchestration currently share one module. |
 | Learning content | [content/curriculum.js](../content/curriculum.js) | Seven units, 29 lessons (20 core), page/activity data, prerequisites, sources, entry routes, Library records, and old lesson aliases. Stable IDs connect content to persisted progress. |
-| Local state | [content/progress.js](../content/progress.js) | Fresh state, normalization, storage access, page completion, attempts, and practice logs. It does not render UI or decide lesson availability. |
+| Local state | [content/progress.js](../content/progress.js), [content/progress-store.js](../content/progress-store.js) | Progress data helpers and lock-coordinated local storage updates, migration, and recovery. |
 | Public discovery | [learn-pickleball/](../learn-pickleball/), [public.css](../public.css), [seo.js](../seo.js) | Static article content and metadata, with links into interactive lessons. Browser script adjusts canonical/social URLs to the current origin and adds JSON-LD. |
 | SEO responses | [api/robots.js](../api/robots.js), [api/sitemap.js](../api/sitemap.js), [api/seo-pages.js](../api/seo-pages.js) | Plain-text robots and XML sitemap, sharing a six-URL registry including `/`. No learner state is involved. |
 | Hosting and request policy | [vercel.json](../vercel.json), [.vercelignore](../.vercelignore), [middleware.js](../middleware.js), [proxy.js](../proxy.js) | Validation build, root static output, deployment exclusions, rewrites, security headers, and user-agent guard. Dashboard configuration is a separate operational concern. |
@@ -42,7 +42,7 @@ The diagram groups infrastructure responsibilities; it is not a claim about the 
 
 1. `index.html` loads `seo.js` and the `app.js` ES module. The app imports curriculum and progress helpers and loads normalized v2 state.
 2. `render()` asks the router which view the hash points to, renders that screen, replaces `#app.innerHTML`, stores `lastViewedRoute`, updates the title, and optionally focuses the main region. A saved route is a record, not automatic full-session restoration.
-3. Document-level click/input/keyboard handlers read `data-action` attributes. Actions update in-memory state, persist meaningful progress, and render again. `hashchange` clears transient answer selections and renders with main focus.
+3. Document-level click/input/keyboard handlers read `data-action` attributes. Progress actions acquire a Web Lock, update the latest stored state, and then render the committed result. `hashchange` clears transient answer selections and renders with main focus.
 4. Completing all required lesson pages marks the concept understood. Optional references and voluntary practice do not block concept completion. Correct answers record completion; reading pages use an explicit completion action.
 5. Next-lesson selection tries the active playlist, then a recommended unit, then the remaining available lessons. Prerequisites and diagnostic access govern availability. Completed lessons remain reviewable.
 
@@ -67,12 +67,13 @@ Compatibility routes: `#/home` opens home; `#/court` and `#/quiz` open Court Lab
 
 ### Progress and failure behavior
 
-`STORE_KEY` is **`learn-pickleball:v2`**, with schema version **2**. State includes route/placement choices, per-lesson required and optional pages, attempts, concept status, practice logs, Court Lab state, earned sticker IDs, and the last viewed route.
+The current app stores v2 progress in **`learn-pickleball:v2:coordinated`**. On the first saved action it copies the previous `learn-pickleball:v2` record and leaves that original in place for older tabs and recovery. Each study condition gets its own coordinated key and lock. The record also tracks a reset generation and any copies retained after resolving an older-tab conflict.
 
-- Storage is origin-specific and browser-specific; there is no sync, backup/export UI, or server copy. Preview and production origins have different stores. Opt-in `?study=baseline`, `?study=discovery`, and `?study=atlas` research conditions use separate progress and session disclosure keys; see the [validation guide](UX_VALIDATION.md). Their v2 schema and lesson gates remain the same.
-- Loading catches storage/JSON errors and returns fresh state. Normalization rejects incompatible versions and unknown lesson IDs and sanitizes selected fields; it is not comprehensive schema validation.
-- v1 data is neither imported nor deleted. Reset clears v2 and rendering persists a fresh v2 record; older keys remain untouched.
-- Failed writes return `false` and expose the storage notice. In-memory use continues in the current page, but a reload can lose changes. A read failure by itself does not guarantee the write-failure notice appears.
+- A short-lived exclusive Web Lock serializes each action's read, update, and write. Rendering and navigation do not save progress. Storage events refresh other tabs but are not used for mutual exclusion. An action queued before a reset is rejected when its generation is stale.
+- Older tabs do not use the lock. If their legacy key changes after migration, new tabs pause writes and ask the learner to reload older tabs and choose a copy. Both copies are retained in the coordinated record; the Progress page can download them as JSON. Repeated changes by an old tab trigger the choice again.
+- Malformed or incompatible records are not overwritten. If safe storage or Web Locks are unavailable, learning can continue in memory for that tab, with a notice that changes will not survive a reload. A failed reset leaves the displayed and stored progress unchanged.
+- Reset writes fresh coordinated progress and advances its generation; it clears conflict recovery copies but leaves the pre-update v2 copy and v1 data in local storage. Storage is origin- and browser-specific, with no account or cross-device sync.
+- Unknown lesson records are preserved by the coordinated store, although normalizing known fields is not comprehensive schema validation. The old `loadProgress` and `saveProgress` helpers remain for legacy contracts and must not be used for current app writes.
 - Required-page progress and attempts persist; current answer selections, Library query/filter state, active court feedback, and modal state are transient; unit disclosure choices live only for the browser session. Reload is not exact visual-session restoration.
 - Court Lab completion requires visits to kitchen, service, and baseline plus the correct map check. That gate also completes linked Court Lab lesson pages. Normalization invalidates earlier v2 exploration-only completion.
 - Selected concept completions award keepsakes; not every lesson has a sticker. Practice records are separate from concept completion and are not a skill rating.
@@ -118,7 +119,7 @@ Open `http://127.0.0.1:4173/`. The static server supports the app and public HTM
 
 `npm run check` is the current build gate. It performs JavaScript syntax checks and runs proxy, SEO, font, sticker, curriculum, and app-v2 checks. These include content integrity, progress helper behavior, legacy alias expectations, source-level rendering contracts, and focused P1 summary, filter, evidence, and storage-fallback checks. They are not a full browser integration suite or accessibility certification.
 
-`npm run test:ui` (not part of the build gate) runs `tests/ui/` in headless Chrome/Chromium through the DevTools Protocol, with no npm dependencies: from a fresh root page it clicks each header tab at desktop width and taps each bottom-bar tab at phone width, then checks the URL, the rendered view (`<main data-view>`), the highlighted tab, and JavaScript errors. Set `CHROME_PATH` if Chrome is not found.
+`npm run test:ui` (run in GitHub Actions, but not in the Vercel build gate) runs `tests/ui/` in headless Chrome/Chromium through the DevTools Protocol, with no npm dependencies. It covers navigation at desktop and phone widths and real tabs sharing storage, including simultaneous updates, resets, older-tab conflicts, and failed writes. Set `CHROME_PATH` if Chrome is not found.
 
 The v2 gate is the maintained validation entry point. Do not treat every script in `scripts/` as an actively supported command.
 

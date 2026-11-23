@@ -24,8 +24,12 @@
   </head>
   <body data-seo-path="/" data-seo-title="Learn Pickleball — Get game-ready" data-seo-description="Learn Pickleball is a free, bite-sized path to feeling ready for your first game." data-seo-image="/assets/hero-rally.png" data-seo-type="website" data-seo-reviewed="2026-09-01">
     <a class="skip-link" href="#main-content">Skip to content</a>
-    <div id="storage-notice" class="storage-notice" role="status" hidden>
-      Progress will stay in this tab only because browser storage is unavailable.
+    <div id="storage-notice" class="storage-notice" hidden>
+      <span data-storage-message role="status" aria-live="polite"></span>
+      <div data-storage-recovery hidden>
+        <button class="button button-secondary" type="button" data-action="legacy-keep">Keep current progress</button>
+        <button class="button button-secondary" type="button" data-action="legacy-use">Use older-tab progress</button>
+      </div>
     </div>
     <div id="app"></div>
     <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
@@ -36,6 +40,6 @@
       </main>
     </noscript>
     <script defer src="seo.js?v=1"></script>
-    <script type="module" src="app.js?v=25"></script>
+    <script type="module" src="app.js?v=26"></script>
   </body>
 </html>

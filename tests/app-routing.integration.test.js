@@ -94,14 +94,14 @@ describe("app.js routing", () => {
     assert.ok(page.title.startsWith(getLesson("kitchen-rule").title), page.title);
   });
 
-  it("adds ?page= to the lesson URL when the last required page completes the lesson", () => {
+  it("adds ?page= to the lesson URL when the last required page completes the lesson", async () => {
     const lesson = getLesson("equipment-safety");
     const required = lesson.pages.filter((page) => page.required !== false);
     for (const url of ["#/lesson/equipment-safety", "#/lesson/equipment%2Dsafety"]) {
       const fresh = loadApp();
       try {
         fresh.visit(url);
-        for (const page of required) fresh.call("recordLessonPage", lesson, page, true);
+        for (const page of required) await fresh.call("handleAction", { target: { closest: () => ({ dataset: { action: "page-complete", lesson: lesson.id, page: page.id } }) } });
         const match = matchRoute(parseRoute(fresh.window.location.hash));
         assert.deepEqual({ lessonId: match.params.lessonId, page: match.route.query.get("page") }, { lessonId: lesson.id, page: required.at(-1).id }, url);
       } finally {

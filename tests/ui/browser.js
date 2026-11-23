@@ -33,7 +33,7 @@ function playwrightChromium(dir) {
     .map((name) => join(dir, name, "chrome-linux", "chrome"));
 }
 
-export async function launchBrowser({ executablePath = findChrome(), timeout = 10_000 } = {}) {
+export async function launchBrowser({ executablePath = findChrome(), timeout = 30_000 } = {}) {
   if (!executablePath) throw new Error("Chrome/Chromium not found. Install it or set CHROME_PATH.");
   const profile = mkdtempSync(join(tmpdir(), "ui-tests-"));
   const child = spawn(executablePath, [
@@ -42,29 +42,50 @@ export async function launchBrowser({ executablePath = findChrome(), timeout = 1
     "--disable-background-networking", "--disable-extensions", "about:blank",
   ], { stdio: ["ignore", "ignore", "pipe"] });
 
-  const endpoint = await new Promise((done, fail) => {
-    let log = "";
-    const timer = setTimeout(() => fail(new Error(`Browser did not start:\n${log}`)), timeout);
-    child.stderr.on("data", (chunk) => {
-      log += chunk;
-      const found = log.match(/DevTools listening on (ws:\/\/\S+)/);
-      if (found) { clearTimeout(timer); done(found[1]); }
+  let cdp;
+  try {
+    const endpoint = await new Promise((done, fail) => {
+      let log = "";
+      let started = false;
+      const timer = setTimeout(() => fail(new Error(`Browser did not start:\n${log}`)), timeout);
+      child.stderr.on("data", (chunk) => {
+        if (started) return; // Keep draining stderr without accumulating it.
+        log += chunk;
+        const found = log.match(/DevTools listening on (ws:\/\/\S+)/);
+        if (found) { started = true; clearTimeout(timer); done(found[1]); }
+      });
+      child.once("error", (error) => { clearTimeout(timer); fail(error); });
+      child.once("exit", (code) => { clearTimeout(timer); fail(new Error(`Browser exited (${code}):\n${log}`)); });
     });
-    child.on("exit", (code) => { clearTimeout(timer); fail(new Error(`Browser exited (${code}):\n${log}`)); });
-  });
+    cdp = await connect(endpoint);
+  } catch (error) {
+    const exited = child.exitCode !== null || child.signalCode !== null || !child.pid
+      ? Promise.resolve()
+      : new Promise((done) => child.once("exit", done));
+    child.kill("SIGKILL");
+    let deadline;
+    try { await Promise.race([exited, new Promise((done) => { deadline = setTimeout(done, 5000); })]); }
+    finally { clearTimeout(deadline); }
+    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    throw error;
+  }
 
-  const cdp = await connect(endpoint);
   return {
     newPage: (viewport) => openPage(cdp, viewport),
     async close() {
       // Wait for the process to exit before deleting its profile folder;
       // Chrome keeps writing to it while shutting down.
-      const exited = child.exitCode !== null ? Promise.resolve() : new Promise((done) => child.once("exit", done));
+      const exited = child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : new Promise((done) => child.once("exit", done));
       await cdp.send("Browser.close").catch(() => {});
       cdp.close();
       const forced = setTimeout(() => child.kill("SIGKILL"), 5_000);
-      await exited;
-      clearTimeout(forced);
+      let deadline;
+      try {
+        await Promise.race([exited, new Promise((_done, fail) => { deadline = setTimeout(() => fail(new Error("Browser did not exit")), 10_000); })]);
+      } finally {
+        clearTimeout(forced);
+        clearTimeout(deadline);
+      }
       rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     },
   };
@@ -80,26 +101,40 @@ async function connect(endpoint) {
   socket.onmessage = ({ data }) => {
     const message = JSON.parse(data);
     if (message.id !== undefined) {
-      const { resolve, reject } = pending.get(message.id);
+      const entry = pending.get(message.id);
+      if (!entry) return; // The command may already have timed out.
+      const { resolve, reject } = entry;
       pending.delete(message.id);
       if (message.error) reject(new Error(`${message.error.message}`));
       else resolve(message.result);
     } else for (const listener of listeners) listener(message);
   };
+  socket.onclose = () => {
+    for (const { reject } of pending.values()) reject(new Error("Browser connection closed"));
+    pending.clear();
+  };
   return {
     send(method, params = {}, sessionId) {
       const id = ++nextId;
-      socket.send(JSON.stringify({ id, method, params, sessionId }));
-      return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => { pending.delete(id); reject(new Error(`Browser command timed out: ${method}`)); }, 15000);
+        pending.set(id, {
+          resolve: (value) => { clearTimeout(timeout); resolve(value); },
+          reject: (error) => { clearTimeout(timeout); reject(error); },
+        });
+        try { socket.send(JSON.stringify({ id, method, params, sessionId })); }
+        catch (error) { clearTimeout(timeout); pending.delete(id); reject(error); }
+      });
     },
     on: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
     close: () => socket.close(),
   };
 }
 
-// A page in its own browser context, so storage starts empty for every page.
-async function openPage(cdp, { width = 1280, height = 800, mobile = false, reducedMotion = false } = {}) {
-  const { browserContextId } = await cdp.send("Target.createBrowserContext");
+// Pages normally get isolated storage; sibling pages deliberately share it.
+async function openPage(cdp, { width = 1280, height = 800, mobile = false, reducedMotion = false, browserContextId: existingContext, initScript } = {}) {
+  const ownsContext = !existingContext;
+  const browserContextId = existingContext || (await cdp.send("Target.createBrowserContext")).browserContextId;
   const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank", browserContextId });
   const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
   const send = (method, params) => cdp.send(method, params, sessionId);
@@ -110,6 +145,7 @@ async function openPage(cdp, { width = 1280, height = 800, mobile = false, reduc
     if (message.method === "Log.entryAdded" && message.params.entry.level === "error") errors.push(message.params.entry.text);
   });
   await Promise.all([send("Page.enable"), send("Runtime.enable"), send("Log.enable")]);
+  if (initScript) await send("Page.addScriptToEvaluateOnNewDocument", { source: initScript });
   await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: mobile ? 3 : 1, mobile });
   if (reducedMotion) await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   if (mobile) await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
@@ -141,14 +177,18 @@ async function openPage(cdp, { width = 1280, height = 800, mobile = false, reduc
   return {
     errors,
     evaluate,
+    newSibling: (options = {}) => openPage(cdp, { ...options, browserContextId }),
     async goto(url) {
-      const loaded = new Promise((done) => {
+      let stopWaiting;
+      const loaded = new Promise((done, fail) => {
+        const timeout = setTimeout(() => { stopWaiting(); fail(new Error(`Timed out loading ${url}`)); }, 15000);
         const off = cdp.on((message) => {
-          if (message.sessionId === sessionId && message.method === "Page.loadEventFired") { off(); done(); }
+          if (message.sessionId === sessionId && message.method === "Page.loadEventFired") { stopWaiting(); done(); }
         });
+        stopWaiting = () => { clearTimeout(timeout); off(); };
       });
-      await send("Page.navigate", { url });
-      await loaded;
+      try { await Promise.all([send("Page.navigate", { url }), loaded]); }
+      finally { stopWaiting(); }
     },
     // Polls a JS expression until it is truthy.
     async waitFor(expression, { timeout = 5_000, interval = 25 } = {}) {
@@ -174,7 +214,8 @@ async function openPage(cdp, { width = 1280, height = 800, mobile = false, reduc
     },
     async close() {
       stop();
-      await cdp.send("Target.disposeBrowserContext", { browserContextId }).catch(() => {});
+      if (ownsContext) await cdp.send("Target.disposeBrowserContext", { browserContextId }).catch(() => {});
+      else await cdp.send("Target.closeTarget", { targetId }).catch(() => {});
     },
   };
 }

@@ -16,14 +16,12 @@ import {
   createFreshProgress,
   studyCondition,
   progressKey,
-  loadProgress,
-  saveProgress,
-  clearProgress,
   getLessonProgress,
   recordPage,
   recordAttempt,
   recordPractice,
 } from "./content/progress.js";
+import { createProgressStore } from "./content/progress-store.js";
 import { parseRoute, matchRoute, href, titled, NAV_ITEMS } from "./routing/simple-router.js";
 import { renderScoringWalkthrough, mountScoringWalkthrough } from "./content/scoring-walkthrough.js";
 
@@ -78,7 +76,21 @@ const situations = [
   { id: "partner", label: "Partner play", lessons: ["partner-communication", "open-play", "partner-systems"] },
 ];
 
-let progress = loadProgress(lessonIds, currentProgressKey);
+let browserStorage;
+try { browserStorage = window.localStorage; } catch { /* Reading remains available for this tab. */ }
+const progressStore = createProgressStore({
+  key: currentProgressKey,
+  lessonIds,
+  storage: browserStorage,
+  locks: window.navigator?.locks,
+});
+const initialProgress = progressStore.read();
+let progress = initialProgress.progress || createFreshProgress();
+let progressGeneration = initialProgress.generation ?? 0;
+let sessionOnly = false;
+let progressQueue = Promise.resolve();
+let legacyConflict = null;
+let pendingResetConflict = false;
 let courtMode = "explore";
 let activeCourtZone = null;
 let courtFeedback = null;
@@ -129,8 +141,91 @@ function refresherLink(label = "Quick refresher", { topic, primary = false } = {
   return `<a class="button button-${priority}" data-cta-priority="${priority}" href="${escapeHtml(refresherHref(topic))}">${escapeHtml(label)}</a>`;
 }
 
-function persist() {
-  if (!saveProgress(progress, currentProgressKey)) document.querySelector("#storage-notice")?.removeAttribute("hidden");
+function progressSummary(value) {
+  const pages = Object.values(value?.lessonProgress || {}).reduce((total, lesson) => total + (Array.isArray(lesson?.requiredPages) ? lesson.requiredPages.length : 0), 0);
+  return `${pages} required pages and ${value?.practiceLogs?.length || 0} practice logs`;
+}
+
+function showStorageNotice(status, details = {}) {
+  if (status === "reset-conflict") pendingResetConflict = true;
+  const notice = document.querySelector("#storage-notice");
+  if (!notice) return;
+  const message = notice.querySelector("[data-storage-message]");
+  const recovery = notice.querySelector("[data-storage-recovery]");
+  const older = notice.querySelector('[data-action="legacy-use"]');
+  const messages = {
+    unavailable: "Progress cannot be saved right now. New changes stay in this tab only.",
+    unsupported: "This browser cannot safely save progress across tabs. New changes stay in this tab only.",
+    invalid: "Saved progress could not be read. It has been preserved; new changes stay in this tab only.",
+    "legacy-changed": `An older tab changed progress. Reload all older tabs, then choose a copy. Current: ${progressSummary(details.progress)}. Older: ${details.legacyProgress ? progressSummary(details.legacyProgress) : "unreadable"}. Both copies will be kept for recovery.`,
+    "recovery-failed": "Your choice could not be saved. Both copies remain in this browser; check browser storage and try again.",
+    "reset-conflict": "Progress changed in another tab. This change was not kept; please review and try again.",
+    "reset-failed": "Progress could not be reset in browser storage. Your saved progress has not been reset.",
+  };
+  notice.removeAttribute("hidden");
+  if (message) message.textContent = messages[status] || messages.unavailable;
+  if (recovery) recovery.hidden = status !== "legacy-changed" && status !== "recovery-failed";
+  if (older) older.disabled = !details.legacyProgress;
+  if (status === "legacy-changed" || status === "recovery-failed") legacyConflict = { generation: details.generation, legacyRaw: details.legacyRaw };
+}
+
+function clearStorageNotice({ acknowledgeResetConflict = false } = {}) {
+  legacyConflict = null;
+  if (acknowledgeResetConflict) pendingResetConflict = false;
+  if (pendingResetConflict) { showStorageNotice("reset-conflict"); return; }
+  document.querySelector("#storage-notice")?.setAttribute("hidden", "");
+}
+
+function enqueueProgressTask(task) {
+  const result = progressQueue.then(task);
+  progressQueue = result.catch(() => {});
+  return result;
+}
+
+function changeProgress(change, { reset = false } = {}) {
+  // Capture the generation when the learner acts, not when a queued task runs.
+  const expectedGeneration = progressGeneration;
+  // Earlier queued actions cannot acknowledge a warning shown after the click.
+  const acknowledgeResetConflict = pendingResetConflict;
+  return enqueueProgressTask(() => applyProgressChange(change, reset, expectedGeneration, acknowledgeResetConflict));
+}
+
+async function applyProgressChange(change, reset, expectedGeneration, acknowledgeResetConflict) {
+  if (sessionOnly) {
+    if (reset) { showStorageNotice("reset-failed"); return null; }
+    return { value: change(progress), saved: false };
+  }
+  const result = await progressStore.update(expectedGeneration, change, { reset });
+  if (result.committed) {
+    // Another tab may have committed again before this promise was delivered.
+    const latest = progressStore.read();
+    const visible = latest.progress ? latest : result;
+    progress = visible.progress;
+    progressGeneration = visible.generation;
+    if (visible.generation !== result.generation) {
+      showStorageNotice("reset-conflict");
+      render();
+      return null;
+    }
+    if (visible.status === "legacy-changed") showStorageNotice(visible.status, visible);
+    else if (visible.status === "ready") clearStorageNotice({ acknowledgeResetConflict });
+    else showStorageNotice("unavailable");
+    return { value: result.value, saved: true };
+  }
+  if (result.progress) {
+    progress = result.progress;
+    progressGeneration = result.generation;
+  }
+  if (result.status === "legacy-changed" || result.status === "reset-conflict") {
+    showStorageNotice(result.status, result);
+    render();
+    return null;
+  }
+  if (reset) { showStorageNotice("reset-failed"); return null; }
+  // Keep the experience usable without risking an unlocked or destructive write.
+  sessionOnly = true;
+  showStorageNotice(result.status);
+  return { value: change(progress), saved: false };
 }
 
 function getEntry(id) {
@@ -159,7 +254,10 @@ function isLessonComplete(lesson) {
 }
 
 function hasLessonActivity(stored) {
-  return Boolean(stored && (stored.conceptUnderstood || stored.requiredPages.length || stored.optionalPages.length || Object.keys(stored.attempts).length));
+  return Boolean(stored && (stored.conceptUnderstood
+    || (Array.isArray(stored.requiredPages) && stored.requiredPages.length)
+    || (Array.isArray(stored.optionalPages) && stored.optionalPages.length)
+    || (stored.attempts && typeof stored.attempts === "object" && Object.keys(stored.attempts).length)));
 }
 
 function hasLearningActivity() {
@@ -218,31 +316,39 @@ function getNextLesson() {
   return candidates.find((lesson) => isLessonAvailable(lesson) && !isLessonComplete(lesson)) || null;
 }
 
-function updateConceptStatus(lesson) {
-  const stored = getLessonProgress(progress, lesson.id);
+function updateConceptStatus(state, lesson) {
+  const stored = getLessonProgress(state, lesson.id);
   const complete = requiredPages(lesson).every((page) => stored.requiredPages.includes(page.id));
   if (complete && !stored.conceptUnderstood) {
     stored.conceptUnderstood = true;
     const sticker = stickers[lesson.id];
-    if (sticker && !progress.earnedStickers.includes(sticker.id)) {
-      progress.earnedStickers.push(sticker.id);
-      activeSticker = sticker;
+    if (sticker && !state.earnedStickers.includes(sticker.id)) {
+      state.earnedStickers.push(sticker.id);
+      return sticker;
     }
   }
-  return stored.conceptUnderstood;
+  return null;
 }
 
-function recordLessonPage(lesson, page, required = page.required !== false) {
-  const wasComplete = isLessonComplete(lesson);
-  recordPage(progress, lesson.id, page.id, { required });
-  updateConceptStatus(lesson);
+function recordLessonPage(lesson, page, required = page.required !== false, state = progress) {
+  const wasComplete = Boolean(state.lessonProgress[lesson.id]?.conceptUnderstood);
+  recordPage(state, lesson.id, page.id, { required });
+  const sticker = updateConceptStatus(state, lesson);
+  return { sticker, completed: !wasComplete && Boolean(state.lessonProgress[lesson.id]?.conceptUnderstood) };
+}
+
+function finishLessonPage(lesson, page, required, result) {
+  if (result.sticker) activeSticker = result.sticker;
   const route = getRoute();
   const match = matchRoute(route);
-  if (required && !wasComplete && isLessonComplete(lesson) && match.view === "lesson" && !route.query.has("page") && resolveLesson(match.params.lessonId).lesson?.id === lesson.id) {
+  if (required && result.completed && match.view === "lesson" && !route.query.has("page") && resolveLesson(match.params.lessonId).lesson?.id === lesson.id) {
     route.query.set("page", page.id);
     window.history.replaceState(null, "", href(route.path, route.query));
   }
-  persist();
+}
+
+function lessonForDisplay(lessonId) {
+  return progress.lessonProgress[lessonId] || { requiredPages: [], optionalPages: [], attempts: {}, conceptUnderstood: false, practiceLogs: [] };
 }
 
 function getPageIndex(lesson, route) {
@@ -250,7 +356,7 @@ function getPageIndex(lesson, route) {
   const pages = lesson.pages || [];
   const requestedIndex = pages.findIndex((page) => page.id === requested);
   if (requestedIndex >= 0) return requestedIndex;
-  const stored = getLessonProgress(progress, lesson.id);
+  const stored = lessonForDisplay(lesson.id);
   const firstIncomplete = pages.findIndex((page) => page.required !== false && !stored.requiredPages.includes(page.id));
   return firstIncomplete >= 0 ? firstIncomplete : 0;
 }
@@ -360,8 +466,8 @@ function placementTarget(entryId) {
   if (entryId === "consistency") {
     const answers = progress.diagnosticAnswers;
     const score = Object.values(answers).reduce((sum, value) => sum + Number(value || 0), 0);
-    progress.placementAnswers.recommendedUnit = score >= 7 ? 6 : 4;
-    const unit = curriculumUnits.find((item) => item.number === progress.placementAnswers.recommendedUnit);
+    const recommendedUnit = score >= 7 ? 6 : 4;
+    const unit = curriculumUnits.find((item) => item.number === recommendedUnit);
     return unit?.lessons.find((lesson) => isLessonAvailable(lesson)) || unit?.lessons[0] || null;
   }
   return getNextLesson();
@@ -434,7 +540,7 @@ function renderLesson(route, rawId) {
   const page = lesson.pages?.[index];
   if (!page) return renderNotFound(route);
   const unit = getUnit(lesson);
-  const stored = getLessonProgress(progress, lesson.id);
+  const stored = lessonForDisplay(lesson.id);
   const done = stored.requiredPages.filter((id) => requiredPages(lesson).some((pageItem) => pageItem.id === id)).length;
   const next = nextPage(lesson, index);
   const nextLesson = getNextLesson();
@@ -486,7 +592,7 @@ function optionValue(option) { return typeof option === "string" ? option : opti
 
 function renderActivity(lesson, page, route) {
   const activity = page.activity;
-  const stored = getLessonProgress(progress, lesson.id);
+  const stored = lessonForDisplay(lesson.id);
   const pageDone = (page.required !== false ? stored.requiredPages : stored.optionalPages).includes(page.id);
   if (!activity) {
     if (pageDone) return '<p class="status is-complete">Page complete</p>';
@@ -559,8 +665,8 @@ function renderCourtTip(fromLesson) {
     : "<p>Visit the <strong>kitchen</strong>, a <strong>service court</strong>, and a <strong>baseline</strong>. Then choose <strong>Court check</strong>.</p>";
 }
 
-function hasCourtZones() {
-  return Object.values(COURT_ZONES).every((zone) => progress.courtVisited.includes(zone));
+function hasCourtZones(state = progress) {
+  return Object.values(COURT_ZONES).every((zone) => state.courtVisited.includes(zone));
 }
 
 function courtReturnTarget(route) {
@@ -693,12 +799,13 @@ function renderProgress(route) {
   const complete = completedLessonCount();
   const next = getNextLesson();
   const earned = progress.earnedStickers.map((id) => Object.values(stickers).find((sticker) => sticker.id === id)).filter(Boolean);
+  const hasRecoveryCopies = Boolean(progressStore.read().record?.recovery?.length);
   const resumeCue = study ? "Resume opens your next incomplete required page." : next ? "Resume starts at your next incomplete required page." : "";
   const resumeAction = next
     ? `<a class="button button-primary" href="${href(`/lesson/${next.id}`)}">Resume: ${escapeHtml(next.title)}</a>`
     : study ? '<a class="button button-primary" href="#/library?view=skills">Choose a review</a>' : refresherLink("Quick refresher", { primary: true });
   const actions = study ? resumeAction : `<div class="progress-actions">${resumeAction}<div class="button-row"><a class="button button-quiet" href="#/learn?review=completed">Review completed lessons</a>${next ? refresherLink() : ""}</div></div>`;
-  return renderShell(`<section class="page"><div class="progress-head"><div><p class="eyebrow">Progress</p><h1>Small wins, useful next steps.</h1><p class="lede">Progress is saved in this browser on this device and does not sync. ${resumeCue ? `${resumeCue} ` : ""}Clearing browser data can erase progress. It is not a rating.</p></div>${actions}</div><div class="progress-summary"><div><strong>${complete}</strong><span>concept steps understood</span></div><div><strong>${practiceCount()}</strong><span>practice logs</span></div><div><strong>${earned.length}</strong><span>keepsakes earned</span></div></div><div class="progress-layout"><section><h2>Continue building</h2><div class="progress-list">${lessons.filter((lesson) => isLessonAvailable(lesson) && !isLessonComplete(lesson)).slice(0, 4).map((lesson) => `<a class="progress-row" href="${href(`/lesson/${lesson.id}`)}"><span><strong>${escapeHtml(lesson.title)}</strong><p>${escapeHtml(lesson.outcome || lesson.summary)}</p></span><span class="status is-current">Open</span></a>`).join("") || '<p class="muted">Your core path is complete. Optional deep dives are ready in Learn and Library.</p>'}</div><details class="reset-details" ${resetArmed ? "open" : ""}><summary>Reset this device’s v2 learning progress</summary><p>This starts the refreshed curriculum again on this browser. It does not change the older v1 key.</p>${resetArmed ? '<div class="button-row"><button class="button button-danger" type="button" data-action="reset-confirm">Reset fresh path</button><button class="button button-quiet" type="button" data-action="reset-cancel">Cancel</button></div>' : '<button class="button button-quiet" type="button" data-action="reset-arm">Reset progress</button>'}</details></section><aside class="progress-aside"><p class="eyebrow">Learning keepsakes</p><h2>${earned.length ? "A few moments worth remembering." : "Your first keepsake will appear here."}</h2>${earned.slice(-3).map((sticker) => `<div class="sticker-line"><img src="${escapeHtml(sticker.asset)}" alt="${escapeHtml(sticker.title)} sticker" /><span><strong>${escapeHtml(sticker.title)}</strong><br /><span class="muted">Earned after a concept step</span></span></div>`).join("") || '<p class="muted">Complete one concept check or explore the Court Lab to collect a small reminder of what you learned.</p>'}</aside></div></section>`, route);
+  return renderShell(`<section class="page"><div class="progress-head"><div><p class="eyebrow">Progress</p><h1>Small wins, useful next steps.</h1><p class="lede">Progress is saved in this browser on this device and does not sync. ${resumeCue ? `${resumeCue} ` : ""}Clearing browser data can erase progress. It is not a rating.</p></div>${actions}</div><div class="progress-summary"><div><strong>${complete}</strong><span>concept steps understood</span></div><div><strong>${practiceCount()}</strong><span>practice logs</span></div><div><strong>${earned.length}</strong><span>keepsakes earned</span></div></div><div class="progress-layout"><section><h2>Continue building</h2><div class="progress-list">${lessons.filter((lesson) => isLessonAvailable(lesson) && !isLessonComplete(lesson)).slice(0, 4).map((lesson) => `<a class="progress-row" href="${href(`/lesson/${lesson.id}`)}"><span><strong>${escapeHtml(lesson.title)}</strong><p>${escapeHtml(lesson.outcome || lesson.summary)}</p></span><span class="status is-current">Open</span></a>`).join("") || '<p class="muted">Your core path is complete. Optional deep dives are ready in Learn and Library.</p>'}</div>${hasRecoveryCopies ? '<p>Earlier progress copies are available after resolving a conflict. <button type="button" class="button button-quiet" data-action="download-recovery">Download recovery copies</button></p>' : ""}<details class="reset-details" ${resetArmed ? "open" : ""}><summary>Reset this device’s v2 learning progress</summary><p>This clears current progress and conflict recovery copies. A copy from before the multi-tab update may remain in this browser; older tabs and v1 data are not changed.</p>${resetArmed ? '<div class="button-row"><button class="button button-danger" type="button" data-action="reset-confirm">Reset fresh path</button><button class="button button-quiet" type="button" data-action="reset-cancel">Cancel</button></div>' : '<button class="button button-quiet" type="button" data-action="reset-arm">Reset progress</button>'}</details></section><aside class="progress-aside"><p class="eyebrow">Learning keepsakes</p><h2>${earned.length ? "A few moments worth remembering." : "Your first keepsake will appear here."}</h2>${earned.slice(-3).map((sticker) => `<div class="sticker-line"><img src="${escapeHtml(sticker.asset)}" alt="${escapeHtml(sticker.title)} sticker" /><span><strong>${escapeHtml(sticker.title)}</strong><br /><span class="muted">Earned after a concept step</span></span></div>`).join("") || '<p class="muted">Complete one concept check or explore the Court Lab to collect a small reminder of what you learned.</p>'}</aside></div></section>`, route);
 }
 
 function renderNotFound(route) {
@@ -746,8 +853,6 @@ function render({ focusMain = false, lessonFocus = null } = {}) {
     const walkthrough = document.querySelector("[data-scoring-walkthrough]");
     if (walkthrough) stopScoringWalkthrough = mountScoringWalkthrough(walkthrough);
   }
-  progress.lastViewedRoute = route.raw;
-  persist();
   document.title = titleForRoute(route);
   if (lessonFocus && activeSticker) pendingLessonFocus = lessonFocus;
   if (lessonFocus && !activeSticker) requestAnimationFrame(() => {
@@ -783,30 +888,34 @@ function showToast(message) {
   toastTimer = setTimeout(() => region.classList.remove("is-visible"), 2800);
 }
 
-function markCourtLabPagesComplete() {
-  lessons.forEach((lesson) => (lesson.pages || []).filter((page) => page.activity?.kind === "court-lab").forEach((page) => recordLessonPage(lesson, page, page.required !== false)));
+function markCourtLabPagesComplete(state) {
+  const results = [];
+  lessons.forEach((lesson) => (lesson.pages || []).filter((page) => page.activity?.kind === "court-lab").forEach((page) => results.push(recordLessonPage(lesson, page, page.required !== false, state))));
+  return results;
 }
 
-function completeCourtLabGate() {
-  if (!hasCourtZones() || !progress.courtKnowledgePassed || progress.courtExplored) return false;
-  progress.courtExplored = true;
-  markCourtLabPagesComplete();
+function completeCourtLabGate(state) {
+  if (!hasCourtZones(state) || !state.courtKnowledgePassed || state.courtExplored) return null;
+  state.courtExplored = true;
+  const results = markCourtLabPagesComplete(state);
   const sticker = { id: "court-explorer", title: "Court Explorer", asset: "assets/stickers/court-explorer.png" };
-  if (!progress.earnedStickers.includes(sticker.id)) {
-    progress.earnedStickers.push(sticker.id);
-    activeSticker = sticker;
+  if (!state.earnedStickers.includes(sticker.id)) {
+    state.earnedStickers.push(sticker.id);
+    return sticker;
   }
-  return true;
+  return results.find((result) => result.sticker)?.sticker || null;
 }
 
-function handleCourtZone(target) {
+async function handleCourtZone(target) {
   const zone = target.dataset.zone;
   const category = target.dataset.category;
+  const result = await changeProgress((state) => {
+    if (!state.courtVisited.includes(category)) state.courtVisited.push(category);
+  });
+  if (!result) return;
   activeCourtZone = zone;
-  if (!progress.courtVisited.includes(category)) progress.courtVisited.push(category);
   if (courtMode === "serve") courtFeedback = { correct: zone === "top-right-service", text: zone === "top-right-service" ? "Correct. From the lower-left baseline, the serve travels across the net and centreline to the top-right service court." : "Trace across the net and centreline. The opposite service court is the target." };
   else courtFeedback = null;
-  persist();
   render();
   requestAnimationFrame(() => {
     if (!activeSticker && ["/court", "/court-lab", "/quiz"].includes(getRoute().path)) {
@@ -823,29 +932,158 @@ function lessonFocusAfterAction(lesson, page, answered) {
   return answered ? ".lesson-page .feedback" : '.lesson-footer [data-cta-priority="primary"]';
 }
 
-function handleAction(event) {
+async function handleAction(event) {
   const target = event.target.closest("[data-action]");
   if (!target) return;
   const action = target.dataset.action;
   if (action === "sticker-dismiss") { activeSticker = null; const lessonFocus = pendingLessonFocus; pendingLessonFocus = null; render({ focusMain: true, lessonFocus }); return; }
-  if (action === "study-entry" && study === STUDY_CONDITIONS.DISCOVERY && ["first-game-essentials", "consistency"].includes(target.dataset.entry)) { progress.entryRouteId = target.dataset.entry; progress.activePlaylistId = target.dataset.entry === "first-game-essentials" ? target.dataset.entry : null; progress.placementAnswers = {}; progress.diagnosticAnswers = {}; persist(); window.location.hash = "#/placement"; return; }
-  if (action === "set-entry") { progress.entryRouteId = target.dataset.entry; progress.activePlaylistId = target.dataset.entry === "first-game-essentials" ? target.dataset.entry : null; progress.placementAnswers = {}; progress.diagnosticAnswers = {}; persist(); render({ focusMain: true }); return; }
-  if (action === "diagnostic-answer") { progress.diagnosticAnswers[target.dataset.question] = Number(target.dataset.value); persist(); render({ focusMain: true }); return; }
-  if (action === "placement-restart") { progress.entryRouteId = null; progress.activePlaylistId = null; progress.placementAnswers = {}; progress.diagnosticAnswers = {}; persist(); render({ focusMain: true }); return; }
+  if (action === "download-recovery") {
+    const copies = progressStore.read().record?.recovery;
+    if (!copies?.length) return;
+    const blob = new Blob([JSON.stringify({ version: 1, copies }, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "learn-pickleball-recovery.json";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return;
+  }
+  if (action === "legacy-keep" || action === "legacy-use") {
+    const expected = legacyConflict;
+    const result = await enqueueProgressTask(() => progressStore.resolveLegacy(action === "legacy-keep" ? "current" : "legacy", expected));
+    if (!result.committed) {
+      if (result.status === "unavailable") {
+        const current = progressStore.read();
+        if (current.status === "legacy-changed") { showStorageNotice("recovery-failed", current); return; }
+      }
+      if (result.status === "ready") {
+        progress = result.progress;
+        progressGeneration = result.generation;
+        clearStorageNotice();
+        showToast("The progress choice was already saved in another tab.");
+        render({ focusMain: true });
+      } else {
+        if (result.progress) { progress = result.progress; progressGeneration = result.generation; render(); }
+        showStorageNotice(result.status === "invalid-legacy" ? "legacy-changed" : result.status, result);
+      }
+      return;
+    }
+    progress = result.progress;
+    progressGeneration = result.generation;
+    pageSelections = {};
+    activeSticker = null;
+    if (result.status === "legacy-changed") showStorageNotice(result.status, result);
+    else clearStorageNotice();
+    showToast("Progress choice saved. A recovery copy remains in this browser.");
+    render({ focusMain: true });
+    return;
+  }
+  if (action === "study-entry" || action === "set-entry") {
+    if (action === "study-entry" && (study !== STUDY_CONDITIONS.DISCOVERY || !["first-game-essentials", "consistency"].includes(target.dataset.entry))) return;
+    const entry = target.dataset.entry;
+    const result = await changeProgress((state) => {
+      state.entryRouteId = entry;
+      state.activePlaylistId = entry === "first-game-essentials" ? entry : null;
+      state.placementAnswers = {};
+      state.diagnosticAnswers = {};
+    });
+    if (!result) return;
+    if (action === "study-entry") window.location.hash = "#/placement";
+    else render({ focusMain: true });
+    return;
+  }
+  if (action === "diagnostic-answer") {
+    const question = target.dataset.question;
+    const value = Number(target.dataset.value);
+    const result = await changeProgress((state) => {
+      state.diagnosticAnswers[question] = value;
+      if (diagnosticQuestions.every((item) => Object.hasOwn(state.diagnosticAnswers, item.id))) {
+        const score = Object.values(state.diagnosticAnswers).reduce((sum, answer) => sum + Number(answer || 0), 0);
+        state.placementAnswers.recommendedUnit = score >= 7 ? 6 : 4;
+      }
+    });
+    if (result) render({ focusMain: true });
+    return;
+  }
+  if (action === "placement-restart") {
+    const result = await changeProgress((state) => { state.entryRouteId = null; state.activePlaylistId = null; state.placementAnswers = {}; state.diagnosticAnswers = {}; });
+    if (result) render({ focusMain: true });
+    return;
+  }
   if (action === "refresher-answer") { answerRefresher(target); return; }
-  if (action === "page-complete") { const lessonPage = getActionLessonPage(target); if (lessonPage) { const { lesson, page } = lessonPage; recordLessonPage(lesson, page, page.required !== false); showToast(page.required !== false ? "Page recorded. Continue when ready." : "Optional reference saved."); render({ lessonFocus: lessonFocusAfterAction(lesson, page, false) }); } return; }
-  if (action === "practice-log") { recordPractice(progress, target.dataset.lesson, target.dataset.mode || "practice"); persist(); showToast("Practice logged. It never changes your concept completion."); render(); return; }
-  if (action === "page-answer") { const lessonPage = getActionLessonPage(target); if (!lessonPage) return; const { lesson, page } = lessonPage; const activity = page.activity || {}; const index = Number(target.dataset.index); const correct = index === correctOptionIndex(activity); pageSelections[activityKey(lesson, page)] = { index }; recordAttempt(progress, lesson.id, activity.id || page.id, correct); if (correct) { recordLessonPage(lesson, page, page.required !== false); showToast("Correct. Page recorded."); } else { persist(); } render({ lessonFocus: lessonFocusAfterAction(lesson, page, true) }); return; }
+  if (action === "page-complete") {
+    const lessonPage = getActionLessonPage(target);
+    if (!lessonPage) return;
+    const { lesson, page } = lessonPage;
+    const required = page.required !== false;
+    const result = await changeProgress((state) => recordLessonPage(lesson, page, required, state));
+    if (!result) return;
+    finishLessonPage(lesson, page, required, result.value);
+    showToast(required ? "Page recorded. Continue when ready." : "Optional reference recorded.");
+    render({ lessonFocus: lessonFocusAfterAction(lesson, page, false) });
+    return;
+  }
+  if (action === "practice-log") {
+    const lessonId = target.dataset.lesson;
+    const mode = target.dataset.mode || "practice";
+    const result = await changeProgress((state) => recordPractice(state, lessonId, mode));
+    if (!result) return;
+    showToast("Practice logged. It never changes your concept completion.");
+    render();
+    return;
+  }
+  if (action === "page-answer") {
+    const lessonPage = getActionLessonPage(target);
+    if (!lessonPage) return;
+    const { lesson, page } = lessonPage;
+    const activity = page.activity || {};
+    const index = Number(target.dataset.index);
+    const correct = index === correctOptionIndex(activity);
+    const result = await changeProgress((state) => {
+      recordAttempt(state, lesson.id, activity.id || page.id, correct);
+      return correct ? recordLessonPage(lesson, page, page.required !== false, state) : null;
+    });
+    if (!result) return;
+    pageSelections[activityKey(lesson, page)] = { index };
+    if (correct) { finishLessonPage(lesson, page, page.required !== false, result.value); showToast("Correct. Page recorded."); }
+    render({ lessonFocus: lessonFocusAfterAction(lesson, page, true) });
+    return;
+  }
   if (action === "court-mode") { courtMode = target.dataset.mode; courtFeedback = null; activeCourtZone = null; render(); return; }
-  if (action === "court-zone") { handleCourtZone(target); return; }
+  if (action === "court-zone") { await handleCourtZone(target); return; }
   if (action === "kitchen-answer") { const correct = target.dataset.answer === "yes"; courtFeedback = { correct, text: correct ? "Volley momentum counts. Landing on or in the non-volley zone after a volley is a fault." : "A volley is not over when its momentum carries the player into the kitchen." }; render(); return; }
-  if (action === "court-check-answer") { const correct = target.dataset.answer === "right"; recordAttempt(progress, "court-orientation", "court-map-check", correct); if (correct) { progress.courtKnowledgePassed = true; completeCourtLabGate(); courtFeedback = { correct: true, text: "Correct. The serve crosses both the net and centreline to the top-right service court." }; } else courtFeedback = { correct: false, text: "Trace across the net and centreline from the lower-left baseline, then try again." }; persist(); render(); return; }
+  if (action === "court-check-answer") {
+    const correct = target.dataset.answer === "right";
+    const result = await changeProgress((state) => {
+      recordAttempt(state, "court-orientation", "court-map-check", correct);
+      if (!correct) return null;
+      state.courtKnowledgePassed = true;
+      return completeCourtLabGate(state);
+    });
+    if (!result) return;
+    if (result.value) activeSticker = result.value;
+    courtFeedback = correct
+      ? { correct: true, text: "Correct. The serve crosses both the net and centreline to the top-right service court." }
+      : { correct: false, text: "Trace across the net and centreline from the lower-left baseline, then try again." };
+    render();
+    return;
+  }
   if (action === "library-clear") { clearTimeout(searchTimer); libraryQuery = ""; libraryFilter = "All topics"; if (study === STUDY_CONDITIONS.DISCOVERY && getRoute().query.has("situation")) window.history.replaceState(null, "", "#/library?view=skills"); render(); requestAnimationFrame(() => document.querySelector('[data-input="library-query"]')?.focus()); return; }
   if (action === "library-view") { clearTimeout(searchTimer); libraryFilter = "All topics"; window.location.hash = `#/library?view=${target.dataset.view}`; return; }
   if (action === "library-filter") { clearTimeout(searchTimer); libraryFilter = target.dataset.filter; render(); requestAnimationFrame(() => [...document.querySelectorAll('[data-action="library-filter"]')].find((button) => button.dataset.filter === libraryFilter)?.focus()); return; }
   if (action === "reset-arm") { resetArmed = true; render(); return; }
   if (action === "reset-cancel") { resetArmed = false; render(); return; }
-  if (action === "reset-confirm") { clearProgress(currentProgressKey); if (study) { unitDisclosure = {}; try { window.sessionStorage.removeItem(UNIT_SESSION_KEY); } catch { /* In-memory fallback. */ } } progress = createFreshProgress(); resetArmed = false; activeSticker = null; showToast("Fresh v2 learning path ready."); render({ focusMain: true }); }
+  if (action === "reset-confirm") {
+    const result = await changeProgress(() => {}, { reset: true });
+    if (!result) return;
+    if (study) { unitDisclosure = {}; try { window.sessionStorage.removeItem(UNIT_SESSION_KEY); } catch { /* In-memory fallback. */ } }
+    pageSelections = {};
+    resetArmed = false;
+    activeSticker = null;
+    showToast("Fresh v2 learning path ready.");
+    render({ focusMain: true });
+  }
 }
 
 document.addEventListener("click", (event) => {
@@ -867,9 +1105,9 @@ document.addEventListener("input", (event) => {
     }, 150);
   }
 });
-document.addEventListener("keydown", (event) => {
+document.addEventListener("keydown", async (event) => {
   const target = event.target.closest?.('[data-action="court-zone"]');
-  if (target && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); handleCourtZone(target); }
+  if (target && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); await handleCourtZone(target); }
   if (event.key === "Tab" && activeSticker) { event.preventDefault(); document.querySelector('[data-action="sticker-dismiss"]')?.focus(); }
   if (event.key === "Escape" && activeSticker) { activeSticker = null; const lessonFocus = pendingLessonFocus; pendingLessonFocus = null; render({ focusMain: true, lessonFocus }); }
 });
@@ -883,4 +1121,53 @@ window.addEventListener("hashchange", () => {
   render({ focusMain: true });
 });
 
+// Notifications refresh the display; actions still acquire the lock before
+// modifying the latest committed record.
+function syncProgressFromStorage() {
+  if (sessionOnly) return;
+  const latest = progressStore.read();
+  if (!latest.progress) { showStorageNotice(latest.status); return; }
+  const wasReset = latest.generation !== progressGeneration;
+  const changed = wasReset || JSON.stringify(latest.progress) !== JSON.stringify(progress);
+  progress = latest.progress;
+  progressGeneration = latest.generation;
+  if (wasReset) { pageSelections = {}; activeSticker = null; pendingLessonFocus = null; }
+  if (latest.status === "legacy-changed") showStorageNotice(latest.status, latest);
+  else clearStorageNotice();
+  if (!changed) return;
+  // These views contain local, in-progress interactions that do not require a
+  // refresh to accept the new progress. Preserve them until the next route.
+  if (["library", "scoring"].includes(matchRoute(getRoute()).view)) return;
+
+  // Preserve the active control when a different tab updates the view.
+  const active = document.activeElement;
+  const wasInsideApp = document.querySelector("#app")?.contains?.(active);
+  const dataset = active?.dataset && { ...active.dataset };
+  const linkHref = active?.tagName === "A" ? active.getAttribute("href") : null;
+  const selector = dataset?.action ? "[data-action]" : dataset?.input ? "[data-input]" : linkHref ? "a[href]" : null;
+  const start = active?.selectionStart;
+  const end = active?.selectionEnd;
+  render();
+  if (wasInsideApp) requestAnimationFrame(() => {
+    const replacement = selector && [...document.querySelectorAll(selector)].find((element) =>
+      linkHref ? element.getAttribute("href") === linkHref : Object.entries(dataset).every(([key, value]) => element.dataset[key] === value));
+    (replacement || document.querySelector("[data-lesson-heading]") || document.querySelector("#main-content"))?.focus({ preventScroll: true });
+    if (replacement?.setSelectionRange && Number.isInteger(start) && Number.isInteger(end)) replacement.setSelectionRange(start, end);
+  });
+}
+
+window.addEventListener("storage", (event) => {
+  if (event.key === null || event.key === currentProgressKey || event.key === progressStore.recordKey) syncProgressFromStorage();
+});
+window.addEventListener("pageshow", syncProgressFromStorage);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") syncProgressFromStorage(); });
+
 render();
+if (initialProgress.status === "legacy-changed") showStorageNotice(initialProgress.status, initialProgress);
+else if (initialProgress.status !== "ready") {
+  sessionOnly = true;
+  showStorageNotice(initialProgress.status);
+} else if (!window.navigator?.locks?.request) {
+  sessionOnly = true;
+  showStorageNotice("unsupported");
+}

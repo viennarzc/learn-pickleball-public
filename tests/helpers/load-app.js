@@ -7,6 +7,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import vm from "node:vm";
 import * as curriculum from "../../content/curriculum.js";
 import * as progressModule from "../../content/progress.js";
+import * as progressStoreModule from "../../content/progress-store.js";
 import * as routing from "../../routing/simple-router.js";
 import * as scoring from "../../content/scoring-walkthrough.js";
 
@@ -33,6 +34,7 @@ export function loadApp({ hash = "#/", search = "" } = {}) {
   const app = { innerHTML: "" };
   const window = {
     location: { hash, search },
+    navigator: { locks: { request: (_name, _options, callback) => Promise.resolve().then(callback) } },
     localStorage: { getItem: (k) => local.get(k) ?? null, setItem: (k, v) => local.set(k, v), removeItem: (k) => local.delete(k) },
     sessionStorage: { getItem: (k) => session.get(k) ?? null, setItem: (k, v) => session.set(k, v), removeItem: (k) => session.delete(k) },
     history: { replaceState: (_state, _title, url) => { window.location.hash = url; } },
@@ -46,7 +48,7 @@ export function loadApp({ hash = "#/", search = "" } = {}) {
   };
   const previousWindow = globalThis.window;
   globalThis.window = window; // content/progress.js reads storage through the global window
-  const context = { ...curriculum, ...progressModule, ...routing, ...scoring, URLSearchParams, console, setTimeout, clearTimeout, window, document, requestAnimationFrame() {} };
+  const context = { ...curriculum, ...progressModule, ...progressStoreModule, ...routing, ...scoring, URLSearchParams, console, setTimeout, clearTimeout, window, document, requestAnimationFrame() {} };
   vm.createContext(context);
   vm.runInContext(source, context);
 
