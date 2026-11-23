@@ -34,9 +34,27 @@ async function holdLock(page) {
   })`);
 }
 
-async function waitForPending(page, count) {
-  await page.waitFor(`navigator.locks.query().then(({ pending }) => pending.filter((lock) => lock.name === ${JSON.stringify(`${NEW_KEY}:lock`)}).length >= ${count})`, { timeout: 10000 });
+async function waitForPending(page, { timeout = 10000 } = {}) {
+  await page.waitFor('navigator.locks.query().then(({ pending }) => pending.filter((lock) => lock.name === "learn-pickleball:v2:coordinated:lock").length >= 2)', { timeout });
 }
+
+it("waits for two pending progress locks", async () => {
+  const { first, second } = await openPair("#/", "#/");
+  try {
+    await holdLock(first);
+    await second.evaluate('void navigator.locks.request("learn-pickleball:v2:coordinated:lock", () => {})');
+    await first.waitFor('navigator.locks.query().then(({ pending }) => pending.filter((lock) => lock.name === "learn-pickleball:v2:coordinated:lock").length === 1)');
+    await assert.rejects(waitForPending(first, { timeout: 150 }), /Timed out/);
+    await second.evaluate('void navigator.locks.request("learn-pickleball:v2:coordinated:lock", () => {})');
+    await waitForPending(first);
+    await first.evaluate("window.releaseProgressLock()");
+    await first.waitFor('navigator.locks.query().then(({ pending, held }) => ![...pending, ...held].some((lock) => lock.name === "learn-pickleball:v2:coordinated:lock"))');
+  } finally {
+    await first.evaluate("window.releaseProgressLock?.()").catch(() => {});
+    await second.close();
+    await first.close();
+  }
+});
 
 it("keeps overlapping updates from two real tabs and does not save during navigation", async () => {
   const { first, second } = await openPair("#/lesson/court-orientation?page=why-court", "#/lesson/court-orientation?page=name-lines");
@@ -44,7 +62,7 @@ it("keeps overlapping updates from two real tabs and does not save during naviga
     await holdLock(first);
     await first.evaluate('document.querySelector(\'[data-action="page-complete"]\').click()');
     await second.evaluate('document.querySelector(\'[data-action="page-complete"]\').click()');
-    await waitForPending(first, 2);
+    await waitForPending(first);
     await first.evaluate("window.releaseProgressLock() ");
     try {
       await first.waitFor(`${hasPage("why-court")} && ${hasPage("name-lines")}`);
@@ -63,7 +81,7 @@ it("keeps overlapping updates from two real tabs and does not save during naviga
     await holdLock(first);
     await first.evaluate('document.querySelector(\'[data-action="page-answer"][data-index="0"]\').click()');
     await second.evaluate('document.querySelector(\'[data-action="page-answer"][data-index="1"]\').click()');
-    await waitForPending(first, 2);
+    await waitForPending(first);
     await first.evaluate("window.releaseProgressLock()");
     await first.waitFor(`${saved}?.progress.lessonProgress["court-orientation"]?.attempts["court-recall-check"]?.count === 2`);
     assert.deepEqual((await first.evaluate(saved)).progress.lessonProgress["court-orientation"].attempts["court-recall-check"], { count: 2, correct: true });
@@ -84,7 +102,7 @@ it("rejects a stale action queued behind a reset", async () => {
     await holdLock(first);
     await first.evaluate('document.querySelector(\'[data-action="reset-confirm"]\').click()');
     await second.evaluate('document.querySelector(\'[data-action="page-complete"]\').click()');
-    await waitForPending(first, 2);
+    await waitForPending(first);
     await first.evaluate("window.releaseProgressLock()");
     await first.waitFor(`${saved}?.generation === 1`);
     await second.waitFor('!document.querySelector("#storage-notice").hidden');
@@ -133,7 +151,15 @@ it("does not report a successful reset when the write fails", async () => {
     await second.waitFor(hasPage("why-court"));
     await second.evaluate('document.querySelector(\'[data-action="reset-arm"]\').click()');
     await second.waitFor('!!document.querySelector(\'[data-action="reset-confirm"]\')');
-    await second.evaluate(`Storage.prototype.setItem = function(name, value) { if (name === ${JSON.stringify(NEW_KEY)}) throw Error("quota"); };`);
+    await second.evaluate(`(() => {
+      const original = Storage.prototype.setItem;
+      Storage.prototype.setItem = function(name, value) {
+        if (name === "learn-pickleball:v2:coordinated") throw Error("quota");
+        return original.call(this, name, value);
+      };
+    })()`);
+    await second.evaluate('localStorage.setItem("unrelated-key", "still writable")');
+    assert.equal(await second.evaluate('localStorage.getItem("unrelated-key")'), "still writable");
     await second.evaluate('document.querySelector(\'[data-action="reset-confirm"]\').click()');
     await second.waitFor('!document.querySelector("#storage-notice").hidden');
     assert.equal(await first.evaluate(hasPage("why-court")), true);
