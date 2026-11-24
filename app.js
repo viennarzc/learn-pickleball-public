@@ -1050,7 +1050,16 @@ async function handleAction(event) {
     render({ lessonFocus: lessonFocusAfterAction(lesson, page, true) });
     return;
   }
-  if (action === "court-mode") { courtMode = target.dataset.mode; courtFeedback = null; activeCourtZone = null; render(); return; }
+  if (action === "court-mode") {
+    const mode = target.dataset.mode;
+    courtMode = mode; courtFeedback = null; activeCourtZone = null; render();
+    requestAnimationFrame(() => {
+      if (matchRoute(getRoute()).view === "court" && courtMode === mode) {
+        [...document.querySelectorAll('[data-action="court-mode"]')].find((button) => button.dataset.mode === mode)?.focus({ preventScroll: true });
+      }
+    });
+    return;
+  }
   if (action === "court-zone") { await handleCourtZone(target); return; }
   if (action === "kitchen-answer") { const correct = target.dataset.answer === "yes"; courtFeedback = { correct, text: correct ? "Volley momentum counts. Landing on or in the non-volley zone after a volley is a fault." : "A volley is not over when its momentum carries the player into the kitchen." }; render(); return; }
   if (action === "court-check-answer") {
@@ -1087,6 +1096,11 @@ async function handleAction(event) {
 }
 
 document.addEventListener("click", (event) => {
+  if (event.target.closest?.(".skip-link")) {
+    event.preventDefault();
+    document.querySelector("#main-content")?.focus();
+    return;
+  }
   if (event.target.closest?.("[data-situation-link]")) { clearTimeout(searchTimer); libraryQuery = ""; libraryFilter = "All topics"; }
   const summary = event.target.closest?.("details[data-unit-id] > summary");
   if (summary) rememberUnit(summary.parentElement.dataset.unitId, !summary.parentElement.open);
