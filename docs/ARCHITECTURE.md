@@ -82,7 +82,7 @@ No service worker or offline app cache is implemented. Local progress persistenc
 
 ## Hosting, SEO, and infrastructure
 
-Vercel configuration uses `framework: null`, `buildCommand: npm run check`, and `outputDirectory: .`. The build validates source; it does not compile a bundle or generate a separate distribution folder. Treat deployable repository content as potentially public. `.gitignore` keeps local notes from ordinary Git staging, while `.vercelignore` excludes internal documentation from deployment uploads; neither rule removes files already committed from Git history.
+Vercel configuration uses `framework: null`, `buildCommand: npm run build`, and `outputDirectory: .`. The build runs the validation gate and generates public contact configuration; it does not compile a bundle or generate a separate distribution folder. Treat deployable repository content as potentially public. `.gitignore` keeps local notes from ordinary Git staging, while `.vercelignore` excludes internal documentation from deployment uploads; neither rule removes files already committed from Git history.
 
 `middleware.js` re-exports the guard from `proxy.js` and matches all paths. The guard returns a no-store 403 for its explicit automation user-agent patterns, otherwise calls `next()`. It deliberately avoids generic “bot” matching, but includes common headless/automation clients, which can affect deployed browser tests. It is neither authentication nor robust protection against spoofed user agents.
 
@@ -105,7 +105,7 @@ Dashboard settings are not proven by configuration files or README instructions.
 
 ## Local setup and maintenance
 
-Use Node/npm for checks and Python 3 (or another static server) for preview. The package does not declare a Node engine version; align your local Node version with the verified Vercel runtime rather than assuming a pinned version.
+Use Node.js 22 (as in CI) and npm for checks, and Python 3 (or another static server) for preview. The package does not declare a Node engine version.
 
 ```sh
 npm ci
@@ -117,9 +117,9 @@ Open `http://127.0.0.1:4173/`. The static server supports the app and public HTM
 
 ### Checks and their limits
 
-`npm run check` is the current build gate. It performs JavaScript syntax checks and runs proxy, SEO, font, sticker, curriculum, and app-v2 checks. These include content integrity, progress helper behavior, legacy alias expectations, source-level rendering contracts, and focused P1 summary, filter, evidence, and storage-fallback checks. They are not a full browser integration suite or accessibility certification.
+`npm run check` is the single non-browser validation command and the build gate. It performs JavaScript syntax checks, runs the maintained validation scripts, and invokes `npm test` for all top-level `tests/*.test.js` files. These cover content integrity, progress helpers, routing, source-level rendering contracts, and focused UX and storage checks. Add new non-browser tests in `tests/` with a `.test.js` suffix. Run `npm test` alone for a faster test-only pass; run the full gate before submitting changes. Neither command is a browser integration suite or accessibility certification.
 
-`npm run test:ui` (run in GitHub Actions, but not in the Vercel build gate) runs `tests/ui/` in headless Chrome/Chromium through the DevTools Protocol, with no npm dependencies. It covers navigation at desktop and phone widths and real tabs sharing storage, including simultaneous updates, resets, older-tab conflicts, and failed writes. Set `CHROME_PATH` if Chrome is not found.
+`npm run test:ui` (run in GitHub Actions, but not in the Vercel build gate) runs `tests/ui/` in headless Chrome/Chromium through the DevTools Protocol, without Playwright. It covers navigation at desktop and phone widths and real tabs sharing storage, including simultaneous updates, resets, older-tab conflicts, and failed writes. Set `CHROME_PATH` if Chrome is not found.
 
 The v2 gate is the maintained validation entry point. Do not treat every script in `scripts/` as an actively supported command.
 

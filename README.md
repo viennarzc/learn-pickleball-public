@@ -28,15 +28,7 @@ python3 -m http.server 4173 --bind 127.0.0.1
 
 Then open `http://127.0.0.1:4173/`.
 
-If you have Node.js installed, you can also run the project's local check
-server with:
-
-```bash
-npm run test:ui
-```
-
-This starts a temporary local server and runs the browser checks in Chrome.
-To serve the app without running tests, use the Python command above.
+The browser tests start their own temporary server; see [Validation](#validation).
 
 ## Deploy to Vercel
 
@@ -134,13 +126,15 @@ Progress is stored in browser local storage. On the first saved action, existing
 
 ## Validation
 
+Use Node.js 22 (the version used by CI) and install dependencies once with `npm ci`. From the repository root, run the complete non-browser validation with one command:
+
 ```sh
-npm ci
 npm run check
-npm run test:ui   # optional: real-browser navigation tests, needs Chrome/Chromium
 ```
 
-The validation gate checks syntax, request policy, SEO, assets, curriculum, and v2 contracts. `npm run test:ui` exercises navigation and shared-storage progress across real tabs in headless Chrome/Chromium; set `CHROME_PATH` if the browser is not found. It is not part of `npm run check`, because the Vercel build has no browser. Accessibility testing remains separate; see the architecture guide.
+This checks JavaScript syntax, request policy, SEO, assets, curriculum, and app contracts, then runs every top-level `tests/*.test.js` file. It exits with a nonzero status if a check or test fails. To run only those Node.js tests, use `npm test`. Put new non-browser tests in `tests/` with a `.test.js` suffix so both commands pick them up.
+
+For changes affecting browser behavior, also run `npm run test:ui`. It starts a temporary local server and exercises navigation and shared-storage progress in headless Chrome/Chromium. Set `CHROME_PATH` if the browser is not found. These tests use the Chrome DevTools Protocol, not Playwright, and are separate from `npm run check` because the Vercel build has no browser. Manual accessibility and device testing remain separate; see the [architecture guide](docs/ARCHITECTURE.md#checks-and-their-limits).
 
 GitHub Actions runs `npm run check` and `npm run test:ui` on Node.js 22 for pull requests and pushes to `main`. The security workflow also runs `npm audit` and CodeQL on those events and weekly on `main`. The npm audit reports known advisories and fails on high or critical findings. CodeQL findings appear under **Security → Code scanning**. The separate Gitleaks workflow checks for committed secrets on pushes and pull requests. Once these workflows are on `main`, you can also start them manually from the **Actions** tab.
 
