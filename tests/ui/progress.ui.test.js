@@ -42,6 +42,38 @@ async function waitForPending(page, { timeout = 10000 } = {}) {
   await page.waitFor('navigator.locks.query().then(({ pending }) => pending.filter((lock) => lock.name === "learn-pickleball:v2:coordinated:lock").length >= 2)', { timeout });
 }
 
+async function waitForInitialCompletion(page, { timeout = 5000 } = {}) {
+  // The storage write precedes the action's UI update. Wait for both before
+  // navigating away and starting a reset in the same tab.
+  await page.waitFor(`${hasPage("why-court")} && !!document.querySelector(".lesson-page .is-complete")`, { timeout });
+}
+
+it("waits for the page action to finish after its storage write", async () => {
+  const initScript = `(() => {
+    const request = navigator.locks.request.bind(navigator.locks);
+    let delay = true;
+    navigator.locks.request = (...args) => {
+      const result = request(...args);
+      if (!delay || args[0] !== "learn-pickleball:v2:coordinated:lock") return result;
+      delay = false;
+      return result.then((value) => new Promise((resolve) => { window.finishInitialSave = () => resolve(value); }));
+    };
+  })()`;
+  const page = await browser.newPage({ initScript });
+  try {
+    await page.goto(`${server.url}/#/lesson/court-orientation?page=why-court`);
+    await page.waitFor('!!document.querySelector(\'[data-action="page-complete"]\')');
+    await page.evaluate('document.querySelector(\'[data-action="page-complete"]\').click()');
+    await page.waitFor(`${hasPage("why-court")} && typeof window.finishInitialSave === "function"`);
+    await assert.rejects(waitForInitialCompletion(page, { timeout: 150 }), /Timed out/);
+    await page.evaluate("window.finishInitialSave()");
+    await waitForInitialCompletion(page);
+  } finally {
+    await page.evaluate("window.finishInitialSave?.()").catch(() => {});
+    await page.close();
+  }
+});
+
 it("waits for two pending progress locks", async () => {
   const { first, second } = await openPair("#/", "#/");
   try {
@@ -97,7 +129,7 @@ it("rejects a stale action queued behind a reset", async () => {
   const { first, second } = await openPair("#/lesson/court-orientation?page=why-court", "#/lesson/court-orientation?page=name-lines");
   try {
     await first.evaluate('document.querySelector(\'[data-action="page-complete"]\').click()');
-    await first.waitFor(hasPage("why-court"));
+    await waitForInitialCompletion(first);
     await second.waitFor(hasPage("why-court"));
     await first.evaluate('location.hash = "#/progress"');
     await first.waitFor('document.querySelector("main")?.dataset.view === "progress"');
@@ -109,7 +141,17 @@ it("rejects a stale action queued behind a reset", async () => {
     await second.evaluate('document.querySelector(\'[data-action="page-complete"]\').click()');
     await waitForPending(first);
     await first.evaluate("window.releaseProgressLock()");
-    await first.waitFor(`${saved}?.generation === 1`);
+    try {
+      await first.waitFor(`${saved}?.generation === 1`);
+    } catch (error) {
+      const states = await Promise.all([first, second].map((page) => page.evaluate(`(async () => ({
+        url: location.href,
+        saved: localStorage.getItem("learn-pickleball:v2:coordinated"),
+        notice: { hidden: document.querySelector("#storage-notice").hidden, text: document.querySelector("#storage-notice").textContent },
+        locks: await navigator.locks.query(),
+      }))()`)));
+      throw new Error(`${error.message}; tab states: ${JSON.stringify(states)}; browser errors: ${JSON.stringify([...first.errors, ...second.errors])}`, { cause: error });
+    }
     await second.waitFor('!document.querySelector("#storage-notice").hidden');
     const record = await first.evaluate(saved);
     assert.equal(record.generation, 1);
@@ -135,7 +177,7 @@ it("keeps the reset-conflict warning through delayed notifications until a retry
   const { first, second } = await openPair("#/lesson/court-orientation?page=why-court", "#/lesson/court-orientation?page=name-lines", { initScript });
   try {
     await first.evaluate('document.querySelector(\'[data-action="page-complete"]\').click()');
-    await first.waitFor(hasPage("why-court"));
+    await waitForInitialCompletion(first);
     await first.evaluate('location.hash = "#/progress"');
     await first.waitFor('document.querySelector("main")?.dataset.view === "progress"');
     await first.evaluate('document.querySelector(\'[data-action="reset-arm"]\').click()');
@@ -179,7 +221,7 @@ it("does not dismiss the warning for an action queued before the warning appeare
       if (event.key === "learn-pickleball:v2:coordinated" && JSON.parse(event.newValue || "null")?.generation === 1) window.sawResetEvent = true;
     })`);
     await first.evaluate('document.querySelector(\'[data-action="page-complete"]\').click()');
-    await first.waitFor(hasPage("why-court"));
+    await waitForInitialCompletion(first);
     await first.evaluate('location.hash = "#/progress"');
     await first.waitFor('document.querySelector("main")?.dataset.view === "progress"');
     await first.evaluate('document.querySelector(\'[data-action="reset-arm"]\').click()');

@@ -109,6 +109,34 @@ for (const device of DEVICES) {
 }
 
 const scoringControl = (control) => `[data-scoring-control="${control}"]`;
+
+for (const [hash, view] of [["#/", "home"], ["#/lesson/court-orientation?page=why-court", "lesson"]]) {
+  it(`skip link focuses main without changing ${view} route`, async () => {
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${server.url}/${hash}`);
+      await page.waitFor(`document.querySelector("main")?.dataset.view === "${view}"`);
+      await page.evaluate('document.querySelector(".skip-link").focus()');
+      await page.pressEnter();
+      await page.waitFor('document.activeElement?.id === "main-content"');
+      assert.equal(await page.evaluate("location.hash"), hash);
+      assert.equal(await page.evaluate('document.querySelector("main").dataset.view'), view);
+    } finally { await page.close(); }
+  });
+}
+
+it("restores keyboard focus after changing Court Lab modes", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${server.url}/#/court-lab`);
+    await page.waitFor('document.querySelector("main")?.dataset.view === "court"');
+    await page.evaluate('document.querySelector(\'[data-action="court-mode"][data-mode="serve"]\').focus()');
+    await page.pressEnter();
+    await page.waitFor('document.activeElement?.dataset.action === "court-mode" && document.activeElement.dataset.mode === "serve" && document.activeElement.getAttribute("aria-pressed") === "true"');
+    assert.equal(await page.evaluate("location.hash"), "#/court-lab");
+  } finally { await page.close(); }
+});
+
 const walkDiagram = '[data-scoring-diagram]';
 const scoringState = `({
   call: [...document.querySelectorAll("[data-scoring-call] strong")].map((number) => +number.textContent),

@@ -206,6 +206,10 @@ async function openPage(cdp, { width = 1280, height = 800, mobile = false, reduc
       await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
       await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
     },
+    async pressEnter() {
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", text: "\r", unmodifiedText: "\r", windowsVirtualKeyCode: 13 });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    },
     // Finger tap, as on a phone (needs a page opened with mobile: true).
     async tap(selector) {
       const { x, y } = await hitPoint(selector);
